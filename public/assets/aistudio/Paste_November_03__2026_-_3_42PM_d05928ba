@@ -1,0 +1,1176 @@
+Work directly on the currently opened GeldStart application.
+
+This is a focused redesign task for the existing “Depot” section only.
+
+Do not create a new project.
+Do not rebuild the entire application.
+Do not modify the educational lessons.
+Do not change the existing Lesson Player.
+Do not redesign Start, Lernen, calculators, or Mehr beyond minimal shared-shell compatibility.
+Do not add real market-data integration in this task.
+Do not refactor unrelated architecture.
+Do not damage the existing GitHub Pages deployment.
+
+The existing application is currently working.
+
+Your job is to transform the current Depot into a distinctive, polished, mobile-first “Market Lab” while preserving the rest of GeldStart as a calm, light educational product.
+
+The intended product identity is:
+
+- Lernen = bright, calm, approachable learning environment.
+- Depot = dark, focused, technical market laboratory.
+- Both remain parts of one consistent GeldStart product.
+
+The Depot must feel more serious and market-oriented, but it must not encourage gambling, speculation, urgency, or emotional trading.
+
+Implement the result directly. Do not only provide design suggestions.
+
+==================================================
+1. STRICT SCOPE
+==================================================
+
+Modify only:
+
+- Depot onboarding;
+- Depot overview;
+- asset search and selection;
+- virtual purchase flow;
+- virtual sale flow if it already exists;
+- position cards;
+- asset details if they already exist;
+- portfolio analysis;
+- Depot charts and chart empty states;
+- Depot-specific components;
+- Depot-specific styling and design tokens;
+- minimal shared shell changes required for the contextual Depot theme;
+- mobile bottom navigation appearance while the Depot route is active.
+
+Do not modify:
+
+- lesson content;
+- Lesson Player;
+- lesson progress;
+- quizzes;
+- Start content;
+- Lernen content;
+- calculator calculations;
+- portfolio calculation formulas;
+- transaction calculations;
+- market-data architecture;
+- server.ts;
+- API endpoints;
+- environment variables;
+- GitHub Pages base-path logic;
+- routing architecture;
+- deployment workflow;
+- existing localStorage keys or schemas unless absolutely necessary for a non-destructive UI preference;
+- educational content outside the Depot.
+
+If a shared component must be updated, preserve its appearance and behavior outside the Depot.
+
+==================================================
+2. PRESERVE WORKING FUNCTIONALITY
+==================================================
+
+Before editing, inspect the current Depot implementation and identify:
+
+- Depot routes;
+- onboarding flow;
+- portfolio model;
+- local persistence;
+- starting-cash logic;
+- purchase flow;
+- sale flow;
+- asset catalogue;
+- position calculations;
+- portfolio totals;
+- profit/loss calculations;
+- cash balance;
+- allocation calculations;
+- snapshots/history;
+- demo-data adapter;
+- chart implementation;
+- error states;
+- reset behavior;
+- navigation;
+- current deployment configuration.
+
+Preserve all currently working behavior unless this prompt explicitly requests a change.
+
+Do not rewrite correct financial calculations merely to match the new design.
+
+Do not rename or migrate persistence keys without necessity.
+
+Do not erase a user’s existing simulated portfolio.
+
+Do not reset existing progress or portfolio data during development.
+
+Do not introduce fake cloud synchronization or authentication.
+
+==================================================
+3. REMOVE RANDOM MARKET MOVEMENT
+==================================================
+
+The current Depot may use random values or random percentage changes when the page is refreshed.
+
+Remove all random price and random performance generation.
+
+The application must never generate a new gain, loss, price, chart shape, or percentage merely because the page was refreshed.
+
+Until real market data is connected in a future task, use one of the following honest states:
+
+1. Stable fixed educational example data;
+2. Previously stored last-known values;
+3. Real portfolio snapshots created by user actions;
+4. A clear empty state when no valid history exists.
+
+Demo values must remain stable between refreshes.
+
+All demo values must be labeled clearly:
+
+“Beispieldaten – keine aktuellen Marktdaten”
+
+Do not label demo values as:
+
+- live;
+- real-time;
+- current market price;
+- actual market price.
+
+Do not silently fall back from unavailable data to random values.
+
+If no valid chart history exists, show:
+
+“Noch nicht genügend Daten für einen Verlauf.”
+
+Do not fabricate historical market performance.
+
+==================================================
+4. CONTEXTUAL DEPOT THEME
+==================================================
+
+When the user enters the Depot section, apply a contextual dark theme to the complete Depot experience.
+
+The theme should transition smoothly from the light learning application into a dark market laboratory.
+
+When the user leaves Depot, return to the normal light GeldStart theme.
+
+Theme transition requirements:
+
+- duration approximately 250–350 ms;
+- transition background, navigation surface, border, and primary text colors;
+- no white flash;
+- no full-screen loading animation;
+- no delayed navigation;
+- respect prefers-reduced-motion;
+- avoid hydration or route-transition flicker;
+- maintain readable colors throughout the transition.
+
+The dark theme applies to:
+
+- Depot onboarding;
+- Depot overview;
+- asset search;
+- asset selection;
+- purchase review;
+- purchase confirmation;
+- sale flow;
+- position detail;
+- portfolio analysis;
+- charts;
+- empty states;
+- error states;
+- Depot dialogs, drawers, and sheets;
+- bottom navigation while Depot is active.
+
+Do not apply this dark theme to lessons or other parts of the application.
+
+==================================================
+5. DEPOT COLOR PALETTE
+==================================================
+
+Create reusable Depot-specific semantic tokens rather than scattering raw hexadecimal colors throughout components.
+
+Use this direction:
+
+Background:
+- primary near-black green: approximately #07100C;
+- secondary surface: approximately #0D1812;
+- card surface: approximately #122019;
+- elevated surface: approximately #182820;
+- border: approximately #26382E.
+
+Text:
+- primary: approximately #F4F7F3;
+- secondary: approximately #A8B8AE;
+- muted: approximately #718078.
+
+Depot accent:
+- main lime: approximately #B7F34A;
+- hover lime: approximately #C8FF68;
+- subtle lime background: rgba(183, 243, 74, 0.10).
+
+Financial states:
+- positive: approximately #61E294;
+- negative: approximately #FF6B6B;
+- warning: approximately #F4C95D.
+
+These values are a design direction, not a requirement to hard-code every exact value.
+
+Requirements:
+
+- the lime accent must not appear everywhere;
+- use lime for the main action, active navigation, selected asset, primary chart line, focus state, and key highlights;
+- positive and negative states must remain distinct from the primary brand accent;
+- never communicate gain or loss through color alone;
+- always include a sign, label, arrow, or text;
+- ensure accessible contrast;
+- use subtle borders rather than heavy shadows;
+- avoid excessive gradients;
+- avoid glassmorphism;
+- avoid neon glow effects;
+- avoid crypto-casino aesthetics.
+
+==================================================
+6. CONSISTENCY WITH GELDSTART
+==================================================
+
+The Depot must feel like a different mode of the same product, not a separate application.
+
+Preserve:
+
+- GeldStart logo;
+- existing font family;
+- overall icon family;
+- base spacing logic;
+- corner-radius system;
+- button interaction quality;
+- bottom navigation structure;
+- German interface language;
+- educational and responsible tone.
+
+The navigation remains:
+
+- Start;
+- Lernen;
+- Depot;
+- Mehr.
+
+Do not add a fifth tab.
+
+While Depot is active:
+
+- use a dark navigation surface;
+- clearly mark Depot with the lime accent;
+- keep all labels readable;
+- respect mobile safe areas;
+- ensure content is not hidden behind navigation.
+
+==================================================
+7. DEPOT INFORMATION HIERARCHY
+==================================================
+
+The current Depot contains too many equally prominent sections.
+
+Redesign the hierarchy so the user understands the screen immediately.
+
+The main Depot overview must prioritize:
+
+1. Current total portfolio value;
+2. Absolute and percentage change;
+3. Available virtual cash;
+4. Main portfolio chart or honest chart empty state;
+5. User positions;
+6. Primary “Investieren” action.
+
+Secondary information:
+
+- data mode;
+- last update;
+- allocation;
+- educational analysis;
+- detailed statistics;
+- legal information.
+
+Do not display four equally large actions at the top.
+
+Primary action:
+
+“Investieren”
+
+Secondary actions should be contextual:
+
+- “Verkaufen” inside an owned position;
+- refresh icon next to data timestamp;
+- analysis as a compact secondary section;
+- reset remains under Mehr/settings.
+
+==================================================
+8. DEPOT HEADER
+==================================================
+
+Replace the large warning card with a compact status header.
+
+Suggested structure:
+
+Übungsdepot                         [refresh icon]
+
+Beispieldaten · Stand 15:27
+
+5.000,00 €
+±0,00 € · ±0,00 %
+
+Verfügbar
+5.000,00 €
+
+[+ Investieren]
+
+The header must clearly state that this is a simulation, but the disclaimer must not dominate the screen.
+
+Use a compact status pill or line:
+
+“Simulation · Beispieldaten”
+
+On interaction, open a small accessible explanation:
+
+- no real money;
+- no real orders;
+- no financial advice;
+- values are educational examples.
+
+Do not repeat the complete disclaimer in multiple large cards.
+
+==================================================
+9. DEPOT OVERVIEW
+==================================================
+
+Create a compact, polished overview.
+
+Recommended order:
+
+A. Compact status line
+- simulation status;
+- data mode;
+- timestamp;
+- refresh action.
+
+B. Portfolio hero
+- portfolio name;
+- total value;
+- absolute result;
+- percentage result;
+- available cash;
+- one primary Investieren button.
+
+C. Portfolio development
+- one primary chart area;
+- range controls only when meaningful;
+- honest empty state when insufficient history exists.
+
+D. Positions
+- compact position cards or rows;
+- clear empty state;
+- each position opens a detail view.
+
+E. Allocation
+- compact distribution view;
+- asset-class or position allocation;
+- do not dominate the screen.
+
+F. Educational portfolio check
+- one short insight based on actual portfolio state;
+- optional expansion for details.
+
+Do not show all analysis and all charts simultaneously.
+
+Reduce visible text substantially.
+
+==================================================
+10. PORTFOLIO HERO
+==================================================
+
+The portfolio total should be the strongest visual element.
+
+Use tabular or monospaced numerals for monetary values, while preserving the existing main font for normal text.
+
+Display:
+
+- total portfolio value;
+- absolute result;
+- percentage result;
+- available cash;
+- last data update.
+
+Example:
+
+5.000,00 €
+
+±0,00 € · ±0,00 %
+
+Verfügbar: 5.000,00 €
+
+Requirements:
+
+- no giant card nested inside another giant card;
+- avoid excessive empty space;
+- do not exaggerate gains or losses;
+- positive and negative states use text plus icon/sign;
+- zero state must be visually neutral;
+- values must not jump due to font-width changes;
+- support long values and German number formatting.
+
+==================================================
+11. CHART DESIGN
+==================================================
+
+Create the structure and visual quality of market charts, but do not invent market history.
+
+Main chart:
+
+- line or area chart;
+- dark chart surface;
+- subtle grid;
+- lime primary line;
+- restrained fill;
+- readable date and currency labels;
+- touch-friendly tooltip;
+- accessible text summary;
+- responsive at 320px width.
+
+Chart periods may include:
+
+- Heute;
+- 1W;
+- 1M;
+- Gesamt.
+
+Only enable a period if valid data exists for it.
+
+Disabled or unavailable periods must not display fabricated data.
+
+If there is only one snapshot, show an honest empty state:
+
+“Noch nicht genügend Daten für einen Verlauf.”
+
+Additional explanation:
+
+“Der Verlauf entsteht erst durch Käufe, Verkäufe und gespeicherte Kursaktualisierungen.”
+
+Do not draw a random placeholder line.
+
+Do not create synthetic candles.
+
+Do not make the chart move on refresh.
+
+Do not interpret fixed demo values as real historical prices.
+
+==================================================
+12. OPTIONAL EDUCATIONAL SCENARIOS
+==================================================
+
+If the current application already contains educational scenario charts, they may remain only if clearly separated from the portfolio chart.
+
+Label them explicitly:
+
+“Lernszenario – keine echte Kursentwicklung”
+
+Possible scenarios:
+
+- ruhiger Verlauf;
+- starke Schwankung;
+- Marktrückgang;
+- Erholung.
+
+These must never alter the actual portfolio value.
+
+These must never be presented as forecasts.
+
+These must never appear as the default real portfolio history.
+
+If no such system currently exists, do not add it during this task.
+
+==================================================
+13. POSITION CARDS
+==================================================
+
+Redesign positions as compact market-style cards or rows.
+
+Suggested structure:
+
+EUNL                         +2,18 %
+MSCI World ETF
+
+1.021,80 €
+10,6417 Anteile
+
+Ø Kaufkurs 93,97 €
+Referenzkurs 95,80 €
+
+Requirements:
+
+- symbol is visually prominent;
+- full name remains readable;
+- current value is easy to scan;
+- gain/loss includes absolute and percentage result;
+- quantity and average purchase price remain available;
+- data mode and timestamp are available without cluttering the card;
+- the full card is interactive;
+- include visible focus and pressed states;
+- do not place multiple small buttons inside every card;
+- selling belongs in the detail view;
+- no random sparkline.
+
+Empty state:
+
+“Noch keine Positionen”
+
+Supporting text should be one short sentence.
+
+Primary action:
+
+“Erste Position hinzufügen”
+
+Optional educational suggestion:
+
+“Mit einem Welt-ETF vergleichen”
+
+Do not show multiple large marketing cards underneath the empty state.
+
+==================================================
+14. ASSET SEARCH
+==================================================
+
+Redesign the existing catalogue into a compact market browser.
+
+Header:
+
+“Wertpapier suchen”
+
+Search field:
+
+“Name oder Symbol suchen …”
+
+Filter chips:
+
+- Alle;
+- ETF;
+- Aktien;
+- Anleihen;
+- Gold.
+
+Keep existing supported assets and existing catalogue logic.
+
+Do not change prices, symbols, asset types, exchanges, currencies, or risk data.
+
+Each asset row should show only the most useful information:
+
+- symbol;
+- shortened name;
+- asset type;
+- exchange;
+- currency;
+- reference/demo price if available;
+- data status if useful.
+
+Example:
+
+EUNL                       93,97 €
+MSCI World ETF
+XETRA · EUR
+
+Do not display a long educational paragraph in every search result.
+
+Opening an item should display a bottom sheet, drawer, or detail screen with:
+
+- full name;
+- symbol;
+- type;
+- exchange;
+- currency;
+- risk classification;
+- short educational explanation;
+- reference price;
+- data timestamp/status;
+- Select action.
+
+Do not add company logos from external services.
+
+Use lightweight type-based icons or letter marks if needed.
+
+==================================================
+15. ASSET DETAIL
+==================================================
+
+If the current application already has an asset-detail view, redesign it.
+
+Suggested hierarchy:
+
+EUNL
+iShares Core MSCI World ETF
+
+93,97 €
+Beispieldaten · Stand 15:28
+
+[chart or valid empty state]
+
+Deine Position
+- value;
+- quantity;
+- average purchase price;
+- gain/loss;
+- portfolio weight.
+
+Actions:
+- Kaufen;
+- Verkaufen, only when owned.
+
+Additional sections:
+- risk explanation;
+- asset type;
+- exchange and currency;
+- educational description;
+- data status.
+
+Do not add real TradingView integration in this task.
+
+A future disabled or omitted integration is preferable to a fake button.
+
+Do not display a non-functional control.
+
+==================================================
+16. VIRTUAL PURCHASE FLOW
+==================================================
+
+Preserve the current purchase calculations and validations.
+
+Redesign the flow into three clear steps:
+
+Step 1 — Select asset
+Step 2 — Enter amount or quantity
+Step 3 — Review and confirm
+
+Step 2 should display:
+
+“Wie viel möchtest du virtuell investieren?”
+
+Use a large readable numeric field.
+
+Optional quick amounts:
+
+- 100 €;
+- 250 €;
+- 500 €;
+- Max.
+
+Only include quick amounts if they work correctly with the current logic.
+
+Step 3 should display a clean order review:
+
+Order prüfen
+
+Kaufbetrag              1.000,00 €
+Referenzkurs                93,97 €
+Stückzahl                  10,6417
+Cash danach              4.000,00 €
+Depotgewicht danach          20,0 %
+
+Below it, show one short educational note:
+
+“Diese Position macht danach 20 % deines Depots aus.”
+
+Primary button:
+
+“Virtuell kaufen”
+
+Requirements:
+
+- clearly mark the transaction as virtual;
+- keep existing validation;
+- prevent invalid negative or zero values;
+- prevent investing more cash than available;
+- preserve fractional-share logic if supported;
+- preserve calculation precision;
+- format monetary values consistently;
+- no fake confirmation delay;
+- no aggressive success animation;
+- no confetti;
+- no sound;
+- do not make the order screen look like a real regulated brokerage order.
+
+==================================================
+17. VIRTUAL SALE FLOW
+==================================================
+
+If selling is already implemented, preserve its logic and redesign its presentation consistently.
+
+Move selling into the position detail.
+
+Display:
+
+- owned quantity;
+- quantity to sell;
+- reference price;
+- expected virtual proceeds;
+- realized result if already supported;
+- remaining position;
+- cash after sale.
+
+Primary confirmation:
+
+“Virtuell verkaufen”
+
+Prevent selling more than owned.
+
+Do not create short selling, leverage, margin, derivatives, options, or borrowing.
+
+If selling is not currently implemented, do not invent it during this design-only task.
+
+==================================================
+18. ALLOCATION
+==================================================
+
+Use one compact allocation view.
+
+Possible categories:
+
+- available cash;
+- ETFs;
+- stocks;
+- bonds;
+- gold.
+
+Use:
+
+- a small donut chart;
+- or horizontal proportional bars.
+
+Choose the format that remains most readable on mobile.
+
+Requirements:
+
+- include text labels and percentages;
+- do not rely only on color;
+- keep the chart secondary to portfolio value and positions;
+- do not show a huge legend;
+- do not display meaningless categories;
+- handle the 100% cash state elegantly.
+
+Example:
+
+Cash       100 %
+ETFs         0 %
+Aktien       0 %
+
+==================================================
+19. PORTFOLIO ANALYSIS
+==================================================
+
+Replace the large analysis action with a compact “Portfolio-Check” card.
+
+Example when empty:
+
+Portfolio-Check
+100 % Cash · Noch keine Positionen
+
+Example after investment:
+
+Portfolio-Check
+Größte Position: EUNL · 42 %
+
+Show only one main insight by default.
+
+Allow the user to expand for more detail.
+
+Insights must be based on actual existing portfolio values.
+
+Do not generate random insights.
+
+Do not add AI-generated investment recommendations.
+
+Do not recommend buying or selling a specific asset.
+
+Use educational language:
+
+- concentration;
+- diversification;
+- available cash;
+- number of asset classes;
+- position weight.
+
+==================================================
+20. DEPOT ONBOARDING
+==================================================
+
+The current four-step onboarding is too text-heavy.
+
+Reduce it to three concise steps while preserving the existing setup logic.
+
+Step 1 — Simulation
+
+Title:
+“Testen ohne echtes Geld”
+
+Content:
+- virtual money only;
+- no real orders;
+- local storage;
+- educational simulation.
+
+Step 2 — Starting balance
+
+Allow the current choices:
+
+- 1.000 €;
+- 5.000 €;
+- 10.000 €;
+- 25.000 €.
+
+Keep portfolio-name input if it already works.
+
+Step 3 — Ready
+
+Show:
+
+- portfolio name;
+- starting cash;
+- base currency;
+- data mode;
+- concise risk note.
+
+Primary button:
+
+“Übungsdepot starten”
+
+Do not add another long rules page.
+
+Place detailed rules behind:
+
+“Was sollte ich wissen?”
+
+Preserve all current setup data and persistence.
+
+==================================================
+21. TEXT REDUCTION
+==================================================
+
+Edit only Depot-related copy.
+
+Reduce visible Depot text by approximately 40–60% while preserving important meaning.
+
+Rules:
+
+- one idea per card;
+- headings are short;
+- supporting text is usually one sentence;
+- avoid repeating “virtual”, “simulation”, and “no real money” in every component;
+- maintain one persistent simulation indicator;
+- preserve the full explanation in an accessible information surface;
+- avoid long paragraphs inside search results;
+- avoid repeating the entire legal disclaimer at both top and bottom;
+- keep essential data-source status visible;
+- use clear German suitable for 16–20-year-olds;
+- avoid professional trading jargon unless explained.
+
+Do not modify educational lesson text outside Depot.
+
+==================================================
+22. RESPONSIBLE MARKET DESIGN
+==================================================
+
+Use market aesthetics without gambling mechanics.
+
+Do not add:
+
+- flashing numbers;
+- rapidly changing colors;
+- confetti for gains;
+- celebratory profit messages;
+- countdown timers;
+- urgency;
+- “hot” assets;
+- trending recommendations;
+- top winners/losers as emotional bait;
+- profit leaderboards;
+- achievement rewards based on returns;
+- buy pressure;
+- FOMO copy;
+- random price movement;
+- random charts;
+- prediction features;
+- expected future return lines;
+- “beat the market” messages;
+- sounds for transactions.
+
+Use:
+
+- calm updates;
+- honest timestamps;
+- clear data status;
+- concentration warnings;
+- diversification education;
+- neutral gain/loss language;
+- thoughtful order review;
+- reflection after a purchase.
+
+The user should feel curious and informed, not pressured or excited into trading.
+
+==================================================
+23. RESPONSIVE DESIGN
+==================================================
+
+Test at least:
+
+- 320px;
+- 375px;
+- 390px;
+- 430px;
+- 768px;
+- desktop.
+
+Requirements:
+
+- no horizontal scrolling;
+- no clipped numbers;
+- no overlapping chart controls;
+- no content hidden under bottom navigation;
+- no content hidden under fixed order buttons;
+- safe-area support;
+- comfortable touch targets;
+- readable chart labels;
+- asset rows remain usable at 320px;
+- long names truncate or wrap intentionally;
+- order values align correctly;
+- desktop uses available width without becoming a dense professional terminal.
+
+==================================================
+24. ACCESSIBILITY
+==================================================
+
+Implement:
+
+- semantic landmarks;
+- correct heading order;
+- keyboard navigation;
+- visible lime focus states;
+- accessible dialogs and sheets;
+- correct focus return;
+- accessible chart summaries;
+- accessible gain/loss labels;
+- color-independent financial states;
+- reduced-motion support;
+- form labels;
+- clear validation messages;
+- screen-reader-friendly button names;
+- sufficient contrast;
+- touch-friendly controls.
+
+The lime accent must remain readable against dark surfaces.
+
+==================================================
+25. ERROR AND EMPTY STATES
+==================================================
+
+Create polished Depot-specific states for:
+
+- no portfolio;
+- no positions;
+- insufficient chart history;
+- demo-data mode;
+- unavailable price;
+- unavailable analysis;
+- invalid input;
+- insufficient cash;
+- optional backend unavailable;
+- corrupted local portfolio data, if current architecture already handles it.
+
+All states must match the dark Depot theme.
+
+An error inside Depot must not crash the complete GeldStart application.
+
+Do not modify the global Error Boundary unless needed to preserve it.
+
+==================================================
+26. PERFORMANCE
+==================================================
+
+Keep the redesign lightweight.
+
+Requirements:
+
+- do not add a large animation framework unless already installed;
+- do not add external images;
+- do not make network requests for decorative assets;
+- avoid expensive chart rerenders;
+- preserve memoized calculations where useful;
+- keep transitions CSS-based where possible;
+- avoid layout shifts;
+- avoid loading a separate font only for the Depot;
+- use existing chart and icon dependencies where possible.
+
+==================================================
+27. TECHNICAL SAFETY
+==================================================
+
+Do not modify:
+
+- package versions;
+- package-lock.json;
+- dependency resolution;
+- Vite configuration;
+- GitHub Pages base path;
+- GitHub Actions;
+- server.ts;
+- market-data API adapters;
+- environment variables;
+- API keys;
+- routing strategy.
+
+Do not add a dependency unless absolutely necessary.
+
+Prefer the existing:
+
+- icon library;
+- chart library;
+- component system;
+- styling system;
+- utility functions;
+- responsive hooks.
+
+Do not migrate the project to another framework.
+
+Do not introduce TanStack Start or Lovable-specific packages.
+
+Do not create a backend.
+
+Do not expose secrets.
+
+==================================================
+28. GITHUB PAGES PROTECTION
+==================================================
+
+The current application already has a working GitHub Pages deployment.
+
+Do not change deployment logic.
+
+Before finishing:
+
+- verify the existing Vite base-path handling remains unchanged;
+- verify the existing workflow remains unchanged;
+- verify production build still succeeds;
+- verify production preview renders;
+- verify the Depot works under the existing repository subpath;
+- verify no root-absolute asset paths were introduced;
+- verify no route produces a blank white screen;
+- verify leaving and re-entering Depot works;
+- verify refreshing the Depot does not crash the application;
+- verify the dark contextual theme initializes without a white flash.
+
+Do not claim deployment was tested unless you actually tested it.
+
+==================================================
+29. VALIDATION
+==================================================
+
+Before finishing, perform all available checks:
+
+1. Install dependencies using the project’s existing method.
+2. Run TypeScript validation.
+3. Run existing tests.
+4. Run production build.
+5. Run production preview.
+6. Open the preview and verify rendering.
+7. Test Depot onboarding.
+8. Create a portfolio.
+9. Refresh and verify persistence.
+10. Open asset search.
+11. Filter assets.
+12. Open asset detail.
+13. Complete a virtual purchase.
+14. Verify cash and position values.
+15. Refresh and verify values remain stable.
+16. Verify there is no random price movement.
+17. Verify no random percentage movement.
+18. Verify no fabricated chart history.
+19. Verify an insufficient-history chart state.
+20. Verify allocation.
+21. Verify the portfolio check.
+22. Verify mobile layout.
+23. Verify dark-to-light route transition.
+24. Verify reduced-motion behavior.
+25. Verify no unrelated educational screen changed.
+26. Verify no deployment file changed.
+27. Verify no localStorage data was erased.
+28. Verify no API key or secret was introduced.
+
+Fix errors caused by your changes.
+
+Do not report a check as successful unless it was actually executed.
+
+==================================================
+30. ACCEPTANCE CRITERIA
+==================================================
+
+The task is complete only when:
+
+- only the Depot section receives the major redesign;
+- Start, Lernen, Lesson Player, calculators, and Mehr remain functionally intact;
+- Depot transitions into a dark contextual theme;
+- leaving Depot restores the light theme;
+- lime is used as a controlled Depot accent;
+- Depot is visually consistent with GeldStart;
+- the overview has a clear hierarchy;
+- portfolio value is immediately understandable;
+- search results are compact;
+- purchase flow is clear;
+- existing calculations remain unchanged;
+- onboarding is reduced to three concise steps;
+- no random market movement remains;
+- demo values are stable;
+- demo mode is clearly labeled;
+- charts do not fabricate historical prices;
+- empty chart states are polished;
+- position cards are mobile-friendly;
+- no gambling mechanics were introduced;
+- no unrelated route was redesigned;
+- local persistence remains compatible;
+- production build succeeds;
+- preview renders;
+- GitHub Pages configuration remains intact;
+- no white screen is introduced;
+- no backend or real market-data implementation was attempted.
+
+==================================================
+31. FINAL RESPONSE FORMAT
+==================================================
+
+After implementing the redesign, provide a concise report with:
+
+1. Existing Depot architecture discovered.
+2. Depot screens modified.
+3. Components created.
+4. Components modified.
+5. Files intentionally left untouched.
+6. Dark-theme implementation.
+7. Theme-transition behavior.
+8. Information hierarchy changes.
+9. Text removed or shortened.
+10. Chart behavior.
+11. Exact handling of demo data.
+12. Confirmation that random values were removed.
+13. Purchase and sale flow changes.
+14. Accessibility improvements.
+15. Responsive checks.
+16. Commands actually executed.
+17. Build and preview results.
+18. Confirmation that educational routes still work.
+19. Confirmation that deployment files were not modified.
+20. Known limitations.
+21. Screens or flows that I should manually review.
+
+Begin by inspecting the current Depot implementation.
+
+Then implement the redesign directly.
+
+Do not ask for confirmation between phases.
+
+Do not modify anything outside the defined scope unless it is absolutely necessary to prevent a regression.

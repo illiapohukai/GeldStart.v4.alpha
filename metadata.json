@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix Remix Geldstart – Finanzbildung für junge Leute",
+  "description": "Mobile-first Lern-App rund um Sparen, Zinseszins, Anlageklassen, Altersvorsorge und staatliche Förderung – einfach erklärt für 16- bis 20-Jährige.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
