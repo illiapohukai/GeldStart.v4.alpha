@@ -9,10 +9,15 @@ import {
   ChevronDown,
   ChevronUp,
   Info,
+  ShieldCheck,
   SlidersHorizontal,
   Wallet,
 } from 'lucide-react';
-import { BudgetPlannerInteractive } from '@/components/InteractiveWidgets';
+import {
+  BudgetPlannerInteractive,
+  ProviderComparisonWidget,
+  RetirementBreakdownInteractive,
+} from '@/components/InteractiveWidgets';
 import {
   CALCULATOR_PRESETS,
   calculateCompoundInterest,
@@ -21,7 +26,18 @@ import {
 } from '@/lib/calculator';
 
 export function RechnerPage() {
-  const [activeTool, setActiveTool] = useState<'compound' | 'budget'>('compound');
+  const [activeTool, setActiveTool] = useState<
+    'compound' | 'altersvorsorgedepot' | 'budget'
+  >(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const tab = params.get('tab') || params.get('mode');
+      if (tab === 'altersvorsorgedepot' || tab === 'budget') {
+        return tab;
+      }
+    }
+    return 'compound';
+  });
 
   // Compound calculator state: 3 primary inputs + 1 progressive setting (initialAmount)
   const [monthlyContribution, setMonthlyContribution] = useState(50);
@@ -32,6 +48,7 @@ export function RechnerPage() {
   // Progressive disclosure toggles
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [showMethodology, setShowMethodology] = useState(false);
+  const [showProvidersOnCalculator, setShowProvidersOnCalculator] = useState(false);
 
   const input: CompoundCalculatorInput = useMemo(
     () => ({
@@ -67,27 +84,28 @@ export function RechnerPage() {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       {/* Header + Tool Switcher */}
-      <header className="surface-card p-6 sm:p-7 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <header className="surface-card p-6 sm:p-7 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-foreground">
             Finanz-Rechner
           </h1>
           <p className="text-base text-muted-foreground">
-            Simuliere langfristige Sparpläne oder plane dein monatliches Budget.
+            Simuliere langfristige Sparpläne, das geförderte Altersvorsorgedepot (ab 2027) oder dein monatliches Budget.
           </p>
         </div>
 
         <div
           role="tablist"
           aria-label="Rechner auswählen"
-          className="inline-flex rounded-2xl border border-border bg-secondary/70 p-1 shrink-0"
+          className="inline-flex flex-wrap rounded-2xl border border-border bg-secondary/70 p-1 shrink-0 gap-1"
         >
           <button
             type="button"
             role="tab"
+            data-testid="tab-compound"
             aria-selected={activeTool === 'compound'}
             onClick={() => setActiveTool('compound')}
-            className={`inline-flex min-h-[42px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition-all ${
+            className={`inline-flex min-h-[42px] items-center gap-2 rounded-xl px-3.5 py-2 text-xs sm:text-sm font-bold transition-all ${
               activeTool === 'compound'
                 ? 'bg-primary text-primary-foreground shadow-xs'
                 : 'text-secondary-foreground hover:text-foreground'
@@ -96,12 +114,30 @@ export function RechnerPage() {
             <Calculator className="h-4 w-4" />
             <span>Zinseszins</span>
           </button>
+
           <button
             type="button"
             role="tab"
+            data-testid="tab-altersvorsorgedepot"
+            aria-selected={activeTool === 'altersvorsorgedepot'}
+            onClick={() => setActiveTool('altersvorsorgedepot')}
+            className={`inline-flex min-h-[42px] items-center gap-2 rounded-xl px-3.5 py-2 text-xs sm:text-sm font-bold transition-all ${
+              activeTool === 'altersvorsorgedepot'
+                ? 'bg-primary text-primary-foreground shadow-xs'
+                : 'text-secondary-foreground hover:text-foreground'
+            }`}
+          >
+            <ShieldCheck className="h-4 w-4" />
+            <span>Altersvorsorgedepot</span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            data-testid="tab-budget"
             aria-selected={activeTool === 'budget'}
             onClick={() => setActiveTool('budget')}
-            className={`inline-flex min-h-[42px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition-all ${
+            className={`inline-flex min-h-[42px] items-center gap-2 rounded-xl px-3.5 py-2 text-xs sm:text-sm font-bold transition-all ${
               activeTool === 'budget'
                 ? 'bg-primary text-primary-foreground shadow-xs'
                 : 'text-secondary-foreground hover:text-foreground'
@@ -113,7 +149,7 @@ export function RechnerPage() {
         </div>
       </header>
 
-      {activeTool === 'compound' ? (
+      {activeTool === 'compound' && (
         <div className="space-y-6">
           {/* Primary Calculator Grid: 3 Essential Sliders + 3 KPI Results & Chart */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -405,12 +441,15 @@ export function RechnerPage() {
                 </div>
               </div>
 
-              {/* Concise 2-Sentence Plain-German Summary */}
+              {/* Concise 2-Sentence Plain-German Summary + Short Disclaimer */}
               <div
                 data-testid="calculator-summary-sentence"
-                className="rounded-2xl border border-primary/20 bg-accent/15 p-4 text-base font-medium leading-relaxed text-foreground"
+                className="rounded-2xl border border-primary/20 bg-accent/15 p-4 space-y-2 text-base font-medium leading-relaxed text-foreground"
               >
-                {result.summarySentence}
+                <p>{result.summarySentence}</p>
+                <p className="text-xs font-semibold text-muted-foreground">
+                  Modellrechnung, keine garantierte Rendite. Der tatsächliche Wert kann höher oder niedriger ausfallen.
+                </p>
               </div>
 
               {/* Progressive Disclosure 2: "Wie wird das berechnet?" */}
@@ -424,7 +463,7 @@ export function RechnerPage() {
                 >
                   <span className="inline-flex items-center gap-2">
                     <Info className="h-4 w-4 text-primary" />
-                    <span>Wie wird das berechnet?</span>
+                    <span>Wie wird das berechnet? (Modellannahmen & Bildungshinweis)</span>
                   </span>
                   {showMethodology ? (
                     <ChevronUp className="h-4 w-4 text-muted-foreground" />
@@ -440,15 +479,57 @@ export function RechnerPage() {
                     <p>
                       <strong>Wichtiger Realitäts-Check:</strong> Echte Börsenkurse verlaufen niemals als glatte Linie, sondern schwanken von Jahr zu Jahr. Außerdem sind mögliche Produktkosten, Inflation und Steuern oberhalb des Sparer-Pauschbetrags (1.000 € p. a.) hier noch nicht abgezogen.
                     </p>
+                    <p className="text-xs pt-1 border-t border-border">
+                      Diese Inhalte dienen ausschließlich der Finanzbildung und stellen keine Anlage-, Steuer- oder Rechtsberatung dar. Modellrechnungen beruhen auf Annahmen. Renditen, Kosten, Steuern und gesetzliche Regeln können sich verändern.
+                    </p>
                   </div>
                 )}
               </div>
             </section>
           </div>
         </div>
-      ) : (
-        <BudgetPlannerInteractive />
       )}
+
+      {activeTool === 'altersvorsorgedepot' && (
+        <div className="space-y-6">
+          <RetirementBreakdownInteractive />
+
+          <div className="surface-card p-5 sm:p-6 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-primary">
+                  Marktüberblick (Stand: November 2026)
+                </p>
+                <h2 className="text-lg sm:text-xl font-extrabold text-foreground">
+                  Anbieterübersicht zum Altersvorsorgedepot (11 Anbieter)
+                </h2>
+              </div>
+              <button
+                type="button"
+                data-testid="toggle-rechner-providers"
+                onClick={() => setShowProvidersOnCalculator((prev) => !prev)}
+                aria-expanded={showProvidersOnCalculator}
+                className="inline-flex min-h-[42px] items-center gap-2 rounded-xl border border-border bg-secondary px-4 py-2 text-xs sm:text-sm font-bold text-foreground hover:bg-muted"
+              >
+                <span>
+                  {showProvidersOnCalculator
+                    ? 'Anbieterübersicht ausblenden'
+                    : 'Alle 11 Anbieter vergleichen'}
+                </span>
+                {showProvidersOnCalculator ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+
+            {showProvidersOnCalculator && <ProviderComparisonWidget />}
+          </div>
+        </div>
+      )}
+
+      {activeTool === 'budget' && <BudgetPlannerInteractive />}
     </div>
   );
 }

@@ -406,3 +406,240 @@ export const CALCULATOR_PRESETS: Array<{
   },
 ];
 
+/**
+ * Altersvorsorgedepot (ab 2027) – Pure Educational Calculation Utilities
+ * Rechts- und Informationsstand: November 2026
+ */
+
+export function calculateBasicAllowance(annualContribution: number): number {
+  const safeAnnual = Number.isFinite(annualContribution) ? annualContribution : 0;
+  const eligibleContribution = Math.min(Math.max(safeAnnual, 0), 1800);
+
+  const firstTier = Math.min(eligibleContribution, 360) * 0.5;
+  const secondTier = Math.max(Math.min(eligibleContribution - 360, 1440), 0) * 0.25;
+
+  return Math.round((firstTier + secondTier) * 100) / 100;
+}
+
+export function calculateChildAllowance(
+  annualContribution: number,
+  eligibleChildren: number,
+): number {
+  const safeAnnual = Number.isFinite(annualContribution) ? annualContribution : 0;
+  const safeChildren = Number.isFinite(eligibleChildren)
+    ? Math.max(0, Math.floor(eligibleChildren))
+    : 0;
+  const allowancePerChild = Math.min(Math.max(safeAnnual, 0), 300);
+
+  return Math.round(allowancePerChild * safeChildren * 100) / 100;
+}
+
+export function calculateCareerStarterBonus(
+  ageAtContractStart: number,
+  eligible = true,
+): number {
+  if (!eligible) return 0;
+  const safeAge = Number.isFinite(ageAtContractStart) ? ageAtContractStart : 25;
+  if (safeAge < 0) return 0;
+  return safeAge < 25 ? 200 : 0;
+}
+
+export interface AllowanceReferencePoint {
+  monthlyContribution: number;
+  annualContribution: number;
+  basicAllowance: number;
+  totalInvestedPerYear: number;
+  allowanceRatioPercent: number;
+}
+
+export const BASIC_ALLOWANCE_REFERENCE_POINTS: AllowanceReferencePoint[] = [
+  10, 25, 30, 50, 100, 150,
+].map((monthly) => {
+  const annual = monthly * 12;
+  const basic = calculateBasicAllowance(annual);
+  return {
+    monthlyContribution: monthly,
+    annualContribution: annual,
+    basicAllowance: basic,
+    totalInvestedPerYear: annual + basic,
+    allowanceRatioPercent: annual > 0 ? Math.round((basic / annual) * 100) : 0,
+  };
+});
+
+export interface RetirementProjectionInput {
+  startAge: number;
+  retirementAge: number;
+  monthlyContribution: number;
+  assumedGrossAnnualReturnPercent: number;
+  estimatedAnnualCostPercent: number;
+  eligibleChildren: number;
+  careerStarterBonusEligible?: boolean;
+}
+
+export interface RetirementProjectionResult {
+  personalContributions: number;
+  basicAllowances: number;
+  childAllowances: number;
+  careerStarterBonus: number;
+  assumedMarketGrowth: number;
+  estimatedCosts: number;
+  projectedValueBeforeTax: number;
+  years: number;
+  annualPersonalContribution: number;
+  annualBasicAllowance: number;
+  annualChildAllowance: number;
+}
+
+export const RETIREMENT_RETURN_PRESETS = [
+  {
+    id: 'cautious',
+    label: 'Vorsichtiges Modell',
+    ratePercent: 2,
+    description: 'Annahme: 2,0 % Bruttorendite p. a.',
+  },
+  {
+    id: 'balanced',
+    label: 'Mittleres Modell',
+    ratePercent: 5,
+    description: 'Annahme: 5,0 % Bruttorendite p. a.',
+  },
+  {
+    id: 'growth',
+    label: 'Chancenorientiertes Modell',
+    ratePercent: 7,
+    description: 'Annahme: 7,0 % Bruttorendite p. a.',
+  },
+] as const;
+
+export function calculateRetirementProjection(
+  rawInput: Partial<RetirementProjectionInput>,
+): RetirementProjectionResult {
+  const startAge = Number.isFinite(rawInput.startAge)
+    ? Math.max(0, Math.min(70, Math.round(rawInput.startAge!)))
+    : 19;
+  const retirementAge = Number.isFinite(rawInput.retirementAge)
+    ? Math.max(0, Math.min(75, Math.round(rawInput.retirementAge!)))
+    : 67;
+  const monthlyContribution = Number.isFinite(rawInput.monthlyContribution)
+    ? Math.max(0, Math.min(5000, Math.round(rawInput.monthlyContribution! * 100) / 100))
+    : 50;
+  const grossReturnPercent = Number.isFinite(rawInput.assumedGrossAnnualReturnPercent)
+    ? Math.max(0, Math.min(15, rawInput.assumedGrossAnnualReturnPercent!))
+    : 5;
+  const annualCostPercent = Number.isFinite(rawInput.estimatedAnnualCostPercent)
+    ? Math.max(0, Math.min(10, rawInput.estimatedAnnualCostPercent!))
+    : 0.4;
+  const eligibleChildren = Number.isFinite(rawInput.eligibleChildren)
+    ? Math.max(0, Math.min(10, Math.floor(rawInput.eligibleChildren!)))
+    : 0;
+  const bonusEligibleFlag =
+    rawInput.careerStarterBonusEligible !== undefined
+      ? Boolean(rawInput.careerStarterBonusEligible)
+      : true;
+
+  const years = Math.max(0, retirementAge - startAge);
+  const annualPersonalContribution = Math.round(monthlyContribution * 12 * 100) / 100;
+  const annualBasicAllowance = calculateBasicAllowance(annualPersonalContribution);
+  const annualChildAllowance = calculateChildAllowance(
+    annualPersonalContribution,
+    eligibleChildren,
+  );
+
+  if (years === 0 || annualPersonalContribution === 0) {
+    return {
+      personalContributions: 0,
+      basicAllowances: 0,
+      childAllowances: 0,
+      careerStarterBonus: 0,
+      assumedMarketGrowth: 0,
+      estimatedCosts: 0,
+      projectedValueBeforeTax: 0,
+      years,
+      annualPersonalContribution,
+      annualBasicAllowance: 0,
+      annualChildAllowance: 0,
+    };
+  }
+
+  const personalContributions = Math.round(annualPersonalContribution * years);
+  const basicAllowances = Math.round(annualBasicAllowance * years);
+  const childAllowances = Math.round(annualChildAllowance * years);
+  const careerStarterBonus = calculateCareerStarterBonus(startAge, bonusEligibleFlag);
+
+  const totalPaidIn =
+    personalContributions + basicAllowances + childAllowances + careerStarterBonus;
+
+  const grossMonthlyFactor = 1 + grossReturnPercent / 100 / 12;
+  const netAnnualRatePercent = grossReturnPercent - annualCostPercent;
+  const netMonthlyFactor = 1 + netAnnualRatePercent / 100 / 12;
+
+  let grossBalance = 0;
+  let netBalance = 0;
+
+  for (let y = 1; y <= years; y++) {
+    if (y === 1 && careerStarterBonus > 0) {
+      grossBalance += careerStarterBonus;
+      netBalance += careerStarterBonus;
+    }
+    for (let m = 0; m < 12; m++) {
+      grossBalance = (grossBalance + monthlyContribution) * grossMonthlyFactor;
+      netBalance = Math.max(0, (netBalance + monthlyContribution) * netMonthlyFactor);
+    }
+    const yearlyAllowances = annualBasicAllowance + annualChildAllowance;
+    grossBalance += yearlyAllowances;
+    netBalance += yearlyAllowances;
+  }
+
+  const assumedMarketGrowth = Math.round(Math.max(0, grossBalance - totalPaidIn));
+  const estimatedCosts = Math.round(Math.max(0, grossBalance - netBalance));
+  const projectedValueBeforeTax = Math.round(
+    Math.max(0, totalPaidIn + assumedMarketGrowth - estimatedCosts),
+  );
+
+  return {
+    personalContributions,
+    basicAllowances,
+    childAllowances,
+    careerStarterBonus,
+    assumedMarketGrowth,
+    estimatedCosts,
+    projectedValueBeforeTax,
+    years,
+    annualPersonalContribution,
+    annualBasicAllowance,
+    annualChildAllowance,
+  };
+}
+
+export function calculateEffectiveAnnualCostRate(
+  portfolioValueEur: number,
+  fixedAnnualFeeEur: number,
+  percentageCostPercent: number,
+): {
+  fixedFeePercentOfPortfolio: number;
+  totalEffectiveCostPercent: number;
+  totalAnnualCostEur: number;
+} {
+  const safePortfolio = Number.isFinite(portfolioValueEur)
+    ? Math.max(100, portfolioValueEur)
+    : 2000;
+  const safeFixed = Number.isFinite(fixedAnnualFeeEur) ? Math.max(0, fixedAnnualFeeEur) : 0;
+  const safePct = Number.isFinite(percentageCostPercent)
+    ? Math.max(0, percentageCostPercent)
+    : 0;
+
+  const fixedFeePercentOfPortfolio =
+    Math.round(((safeFixed / safePortfolio) * 100) * 100) / 100;
+  const totalEffectiveCostPercent =
+    Math.round((fixedFeePercentOfPortfolio + safePct) * 100) / 100;
+  const totalAnnualCostEur =
+    Math.round((safeFixed + (safePortfolio * safePct) / 100) * 100) / 100;
+
+  return {
+    fixedFeePercentOfPortfolio,
+    totalEffectiveCostPercent,
+    totalAnnualCostEur,
+  };
+}
+
+

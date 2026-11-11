@@ -1,0 +1,1227 @@
+You are working inside an EXISTING GeldStart repository that has already been imported directly from GitHub.
+
+This is not a greenfield project.
+
+Your task is to update the existing educational content and extend the existing interactive learning system without replacing the current architecture, redesigning the entire application, or creating a parallel implementation.
+
+IMPORTANT PROJECT AND GITHUB CONSTRAINTS
+
+1. First inspect the existing repository structure, package.json, routes, lesson data, components, widgets, styling system, TypeScript types, and build configuration.
+
+2. Use the existing files, components, patterns, naming conventions, routes, and design system.
+
+3. Do not create a second application, a second src directory, a new project scaffold, or duplicate lesson files.
+
+4. Do not replace the current framework, build tool, routing system, styling system, or state management.
+
+5. Do not regenerate package.json, vite.config, tsconfig, GitHub Actions workflows, or deployment configuration unless an actual compilation error makes a minimal correction necessary.
+
+6. Do not modify .github/workflows or the existing automatic GitHub pull request workflow.
+
+7. Do not create unnecessary files. Prefer modifying existing lesson data, existing calculators, existing widgets, and existing reusable components.
+
+8. Create a new file only if the current architecture clearly requires a separate reusable component or utility. Before creating it, verify that an equivalent component or utility does not already exist.
+
+9. Do not delete or rename existing routes or lesson IDs unless explicitly required below.
+
+10. Preserve the existing application design and mobile-first interaction model.
+
+11. Preserve all existing working lessons, progress tracking, navigation, calculators, virtual depot functions, responsive behavior, and deployment behavior.
+
+12. Do not rewrite unrelated code.
+
+13. Do not manually create a pull request or modify the GitHub automation. Make the requested changes in the imported project. The existing GitHub Actions workflow handles the repository integration.
+
+14. Do not use placeholders such as “TODO”, “coming soon”, fake buttons, empty routes, or non-functional widgets.
+
+15. Before finishing, run the existing type-check, lint, test, and production build commands available in package.json. Fix only errors caused by your changes.
+
+LANGUAGE REQUIREMENTS
+
+All visible application content must be written in clear, natural German.
+
+Code, identifiers, TypeScript types, internal comments, and implementation notes may remain in English.
+
+The German language must be understandable for approximately 16- to 20-year-old users in Germany.
+
+Do not write like a bank advertisement, insurance salesperson, tax adviser, or financial influencer.
+
+PRODUCT PRINCIPLE
+
+GeldStart is a financial education application, not an investment recommendation service.
+
+The learning principle is:
+
+Lernen
+→ ausprobieren
+→ Unterschiede erkennen
+→ Folgen verstehen
+→ selbstständig prüfen
+
+The application must explain:
+
+- which part of a future result comes from the user’s own contributions;
+- which part comes from state allowances;
+- which part is only a possible market development;
+- how costs reduce the result;
+- how taxation and restricted access affect the product;
+- which information a user must verify before entering a real contract.
+
+Do not tell users which provider or product they should choose.
+
+Do not promise returns.
+
+Do not describe a model calculation as a forecast.
+
+Do not rank providers by “best return” or present a recommended winner.
+
+CURRENT CONTENT PROBLEM
+
+The existing lessons contain outdated statements saying that the Altersvorsorgedepot is only a political proposal and has not been adopted.
+
+Replace these statements throughout the project.
+
+Use this legal-status wording consistently:
+
+“Die gesetzliche Grundlage wurde 2026 beschlossen. Zertifizierte Produkte sollen ab dem 1. Januar 2027 angeboten werden. Konkrete Anbieterbedingungen können sich bis zur endgültigen Zertifizierung und Veröffentlichung der Produktunterlagen noch ändern.”
+
+Use a concrete date instead of the vague label “Stand: 2025/2026”.
+
+For the new content, use:
+
+“Rechts- und Informationsstand: November 2026”
+
+Do not silently treat preliminary provider information as final contractual documentation.
+
+IMPLEMENTATION PLAN
+
+Complete the work in the following order.
+
+PHASE 1: AUDIT THE EXISTING IMPLEMENTATION
+
+Before editing:
+
+1. Locate the existing lesson types and LESSONS data.
+2. Locate STATE_SUPPORT_PROGRAMS.
+3. Locate DAILY_QUESTIONS.
+4. Locate all components that render:
+   - intro steps;
+   - explanation steps;
+   - comparison steps;
+   - questions;
+   - scenarios;
+   - interactive widgets;
+   - completion steps.
+5. Locate the current calculator page and its state/calculation utilities.
+6. Locate the current state-status-checker implementation.
+7. Locate all occurrences of:
+   - Altersvorsorgedepot;
+   - Frühstart-Rente;
+   - Riester;
+   - “noch nicht beschlossen”;
+   - “noch nicht in Kraft”;
+   - “Stand: 2025/2026”;
+   - planned state-support labels.
+8. Determine which existing components can be reused before adding new ones.
+
+Do not stop after the audit. Continue with the implementation.
+
+PHASE 2: UPDATE THE TYPE SYSTEM MINIMALLY
+
+Preserve all existing LessonId values:
+
+- grundlagen
+- zinseszins
+- anlageklassen
+- kindergeld
+- altersvorsorgedepot
+- staat
+- taschengeld
+
+Do not create a new main LessonId for the reform. The existing “altersvorsorgedepot” lesson must become the main educational module for the new rules.
+
+Extend InteractiveStepWidget only if the equivalent widgets do not already exist:
+
+- allowance-slider
+- retirement-breakdown
+- cost-impact-slider
+- provider-comparison
+
+Extend LessonVisualMotif only where the existing rendering system can support the new motifs without breaking existing visuals:
+
+- allowance-stack
+- contribution-breakdown
+- tax-timeline
+- three-product-paths
+- locked-until-retirement
+- provider-check
+
+If the current comparison component only supports two cards, add a reusable triple comparison step only if necessary:
+
+export interface TripleComparisonStep {
+  id: string;
+  type: 'triple_comparison';
+  kicker: string;
+  title: string;
+  body: string;
+  cards: [
+    ComparisonCardItem,
+    ComparisonCardItem,
+    ComparisonCardItem
+  ];
+  takeaway: string;
+  moreInfo?: StepMoreInfo;
+}
+
+Add it to LessonStep and implement it using the existing design system.
+
+Do not duplicate the current comparison component.
+
+Update StateSupportProgram status only if necessary:
+
+status:
+  | 'active'
+  | 'available-soon'
+  | 'planned'
+  | 'legacy'
+  | 'changing';
+
+Suggested meaning:
+
+- active: currently available programme;
+- available-soon: legislation adopted, products starting shortly;
+- planned: not yet finally implemented;
+- legacy: existing contracts remain, but no new business under the old system;
+- changing: rules are currently transitioning.
+
+PHASE 3: REBUILD THE EXISTING “ALTERSVORSORGEDEPOT” LESSON
+
+Keep:
+
+id: 'altersvorsorgedepot'
+route: '/altersvorsorgedepot'
+order: 5
+
+Update the metadata to approximately:
+
+categoryLabel: 'Modul 05 · Altersvorsorge ab 2027'
+title: 'Das neue Altersvorsorgedepot'
+shortTitle: 'Vorsorgedepot'
+subtitle:
+  'Eigener Beitrag, staatliche Zulage, mögliche Wertentwicklung, Kosten und Steuern.'
+oneLineDescription:
+  'Wie das neue Altersvorsorgedepot funktioniert und aus welchen Teilen ein möglicher Endwert besteht.'
+readingMinutes: 7
+
+The lesson should contain approximately 10 concise, mobile-friendly steps.
+
+STEP 1: INTRODUCTION
+
+German learning goal:
+
+“Du sparst – der Staat legt etwas dazu”
+
+Explain:
+
+“Ab 2027 können zertifizierte Altersvorsorgedepots angeboten werden. Du zahlst einen eigenen Beitrag ein, der Staat kann eine Zulage ergänzen und das Geld kann langfristig investiert werden.”
+
+Make clear that:
+
+- the state does not pay the full retirement pension;
+- the state does not guarantee investment profit;
+- this is an additional private retirement component.
+
+STEP 2: THREE PILLARS AND PURPOSE
+
+Briefly explain:
+
+1. gesetzliche Altersvorsorge;
+2. betriebliche Altersvorsorge;
+3. private Altersvorsorge.
+
+Use neutral wording:
+
+“Ein privates Altersvorsorgedepot kann die gesetzliche und betriebliche Altersvorsorge ergänzen.”
+
+Do not claim that every user necessarily has an individual pension gap.
+
+STEP 3: GRUNDZULAGE INTERACTIVE
+
+Implement an allowance slider.
+
+Inputs:
+
+- monthly own contribution, preferably from 0 € to 200 €;
+- resulting annual own contribution.
+
+Show separately:
+
+- Monatsbeitrag;
+- Jahresbeitrag;
+- Grundzulage;
+- zusammen investiert;
+- Förderanteil im Verhältnis zum Eigenbeitrag.
+
+Use this calculation:
+
+For an annual own contribution up to 360 €:
+Grundzulage = annual contribution × 0.50
+
+For the annual contribution above 360 € and up to 1,800 €:
+Grundzulage = 180 € + (annual contribution − 360 €) × 0.25
+
+Maximum Grundzulage:
+540 € per year.
+
+Contributions above 1,800 € do not generate an additional Grundzulage in this model.
+
+Show these educational reference points:
+
+- 10 € monthly → 120 € own contribution/year → 60 € Grundzulage;
+- 25 € monthly → 300 € own contribution/year → 150 € Grundzulage;
+- 30 € monthly → 360 € own contribution/year → 180 € Grundzulage;
+- 50 € monthly → 600 € own contribution/year → 240 € Grundzulage;
+- 100 € monthly → 1,200 € own contribution/year → 390 € Grundzulage;
+- 150 € monthly → 1,800 € own contribution/year → 540 € Grundzulage.
+
+Add this German learning statement:
+
+“Die Zulage steigt mit deinem Eigenbeitrag. Wie viel du selbst einzahlst, muss aber zu deinem Budget und deiner langfristigen Planung passen.”
+
+Do not encourage users to maximize the contribution regardless of their budget.
+
+STEP 4: KNOWLEDGE CHECK
+
+Question:
+
+“Du zahlst 30 € pro Monat ein, also 360 € im Jahr. Wie hoch ist die Grundzulage in diesem Modell?”
+
+Options:
+
+- 30 €
+- 180 €
+- 360 €
+- 540 €
+
+Correct answer:
+
+180 €
+
+Explanation:
+
+“Für die ersten 360 € Eigenbeitrag werden 50 Cent Grundzulage je eingezahltem Euro berücksichtigt.”
+
+STEP 5: ADDITIONAL ALLOWANCES
+
+Explain separately:
+
+Berufseinsteigerbonus:
+- 200 €;
+- one-time payment;
+- for an eligible contract concluded before the 25th birthday.
+
+Kinderzulage:
+- 1 € allowance for each 1 € of eligible own contribution;
+- maximum 300 € per eligible child and year.
+
+Visually distinguish:
+
+- jährlich;
+- einmalig;
+- pro Kind.
+
+Add a short distinction:
+
+“Kindergeld unterstützt den laufenden Lebensunterhalt einer Familie. Die Kinderzulage gehört dagegen zur Förderung eines berechtigten Altersvorsorgevertrags.”
+
+STEP 6: RETIREMENT BREAKDOWN INTERACTIVE
+
+Add a separate Altersvorsorgedepot mode to the existing calculator or reuse the existing calculator route.
+
+Prefer adding a new calculator tab instead of creating a separate calculator page:
+
+- Zinseszins
+- Budget
+- Altersvorsorgedepot
+
+Inputs:
+
+- start age;
+- retirement start from 65 to 70;
+- monthly own contribution;
+- assumed gross annual return;
+- estimated annual costs;
+- eligible children;
+- career starter bonus eligibility.
+
+Show results separately:
+
+- Eigene Einzahlungen;
+- Grundzulagen;
+- Kinderzulagen;
+- Berufseinsteigerbonus;
+- mögliche Wertentwicklung;
+- geschätzte Kosten;
+- Modellwert vor Steuern.
+
+Do not show only one large final number.
+
+The visual hierarchy must make the source of each amount clear.
+
+Use at least three model return presets:
+
+- vorsichtiges Modell: 2 %;
+- mittleres Modell: 5 %;
+- chancenorientiertes Modell: 7 %.
+
+These are selectable mathematical assumptions, not forecasts.
+
+Directly below the result, display:
+
+“Modellrechnung, keine garantierte Rendite. Der tatsächliche Wert kann höher oder niedriger ausfallen.”
+
+STEP 7: MODEL VERSUS GUARANTEE
+
+Add a question:
+
+“Warum zeigt der Rechner mehrere mögliche Ergebnisse?”
+
+Correct concept:
+
+“Rendite, Kosten und Kapitalmarktentwicklung stehen nicht im Voraus fest.”
+
+Explain the difference between:
+
+- Zulage according to applicable rules;
+- non-guaranteed market development;
+- contract-specific costs;
+- later taxation.
+
+STEP 8: THREE PRODUCT TYPES
+
+Create a three-card comparison:
+
+1. Standarddepot
+2. Freies Altersvorsorgedepot
+3. Garantieprodukt
+
+STANDARDDEPOT
+
+Use these points:
+
+- simple, standardized structure;
+- restricted selection;
+- usually a growth-oriented and a more defensive component;
+- gesetzliche Begrenzung der Effektivkosten auf maximal 1 %;
+- automatic risk reduction before retirement may apply depending on the product structure.
+
+FREIES ALTERSVORSORGEDEPOT
+
+Use these points:
+
+- broader choice of eligible funds and ETFs;
+- more personal responsibility;
+- costs depend on provider and selected products;
+- no identical 1 % cost limit for every free product configuration.
+
+GARANTIEPRODUKT
+
+Use these points:
+
+- variants with 80 % or 100 % guarantee may exist;
+- reduced loss risk at the relevant retirement date;
+- guarantees can reduce the possible long-term return;
+- price and conditions depend on the concrete provider.
+
+Takeaway:
+
+“Mehr Auswahl, mehr Garantie oder niedrigere Kosten sind unterschiedliche Eigenschaften. Kein Merkmal macht ein Produkt automatisch zur besten Lösung für alle.”
+
+STEP 9: FREE DEPOT VERSUS ALTERSVORSORGEDEPOT
+
+Use an existing two-card comparison component.
+
+Left:
+“Freies Wertpapierdepot”
+
+Points:
+
+- grundsätzlich flexibler verfügbar;
+- keine Grundzulage des Altersvorsorgedepots;
+- große Produktauswahl;
+- normale steuerliche Behandlung;
+- may also be used for non-retirement goals.
+
+Right:
+“Gefördertes Altersvorsorgedepot”
+
+Points:
+
+- staatliche Zulage möglich;
+- Erträge innerhalb des Vertrags in der Ansparphase nicht laufend besteuert;
+- Kapital für die Altersvorsorge gebunden;
+- spätere Auszahlungen grundsätzlich steuerpflichtig;
+- only certified products qualify.
+
+Takeaway:
+
+“Ein freies Depot und ein Altersvorsorgedepot erfüllen unterschiedliche Aufgaben. Entscheidend sind Ziel, Laufzeit, Kosten, Verfügbarkeit und persönliche Voraussetzungen.”
+
+STEP 10: DECISION PROCESS SCENARIO
+
+Create a neutral scenario:
+
+“Nora · 19 Jahre · Ausbildung”
+
+Situation:
+
+“Nora hat nach allen Ausgaben 70 € monatlich übrig. Ihr Notgroschen ist noch nicht vollständig aufgebaut. Sie sieht Werbung für ein Altersvorsorgedepot mit staatlicher Zulage.”
+
+Question:
+
+“Was sollte Nora vor einer Entscheidung prüfen?”
+
+Correct answer:
+
+“Budget und Notgroschen, Bindungsdauer, Effektivkosten, verfügbare Anlageprodukte, Garantien und Auszahlungsregeln.”
+
+Incorrect choices may include:
+
+- immediately paying the full 70 € only to maximize the allowance;
+- selecting the provider with the most attractive advertisement;
+- assuming that the shown model return is guaranteed.
+
+COMPLETION STEP
+
+Use approximately:
+
+title:
+“Du kannst Förderung und Rendite jetzt trennen.”
+
+summaryPoints:
+
+- “Das Altersvorsorgedepot ergänzt die gesetzliche und betriebliche Altersvorsorge.”
+- “Die Grundzulage steigt mit dem Eigenbeitrag und beträgt in diesem Modell maximal 540 € pro Jahr.”
+- “Bei Vertragsabschluss vor dem 25. Geburtstag kann ein einmaliger Berufseinsteigerbonus von 200 € berücksichtigt werden.”
+- “Rendite ist nicht garantiert; Kosten und Steuern beeinflussen das Ergebnis.”
+- “Das Kapital ist für die Altersvorsorge gedacht und nicht so frei verfügbar wie in einem normalen Depot.”
+
+Bridge to the calculator:
+
+label:
+“Eigene Förderung simulieren”
+
+description:
+“Trenne Eigenbeiträge, staatliche Zulagen, mögliche Wertentwicklung und Kosten.”
+
+PHASE 4: UPDATE “STAATLICHE FÖRDERUNG”
+
+Keep:
+
+id: 'staat'
+route: '/staat'
+order: 6
+
+Update the module goal.
+
+This lesson must no longer repeat the complete Altersvorsorgedepot mechanism.
+
+Its purpose is:
+
+- distinguish different public support programmes;
+- understand eligibility;
+- verify conditions;
+- detect cost traps;
+- distinguish active, available-soon, legacy, and planned programmes.
+
+Keep and improve the existing content about:
+
+- Vermögenswirksame Leistungen;
+- Arbeitnehmersparzulage;
+- Wohnungsbauprämie;
+- costs and holding periods;
+- Mia’s VL scenario.
+
+Add these four verification questions:
+
+1. “Bin ich förderberechtigt?”
+2. “Wie viel muss ich selbst einzahlen?”
+3. “Welche Kosten und Bindungsfristen gelten?”
+4. “Wann und wie kann ich über das Geld verfügen?”
+
+Update the state status checker accordingly.
+
+PHASE 5: UPDATE STATE_SUPPORT_PROGRAMS
+
+Separate Altersvorsorgedepot and Frühstart-Rente.
+
+Do not keep a combined object called:
+
+fruehstart-altersvorsorgedepot
+
+Create separate entries.
+
+ALTERSVORSORGEDEPOT
+
+Suggested data:
+
+id: 'altersvorsorgedepot-2027'
+name: 'Gefördertes Altersvorsorgedepot'
+status: 'available-soon'
+statusBadgeText: 'Beschlossen · Produkte ab 01.01.2027'
+standNote: 'Rechts- und Informationsstand: November 2026'
+
+summary:
+“Zertifizierte private Altersvorsorge mit eigenem Beitrag, beitragsabhängiger staatlicher Zulage und möglichen Kapitalmarktanlagen.”
+
+Important conditions must mention:
+
+- maximum supported own contribution of 1,800 € per year in this model;
+- maximum Grundzulage of 540 € per year;
+- restricted availability before retirement;
+- later taxation of payouts;
+- actual conditions depend on the certified contract.
+
+RIESTER
+
+Use:
+
+status: 'legacy'
+statusBadgeText:
+'Bestandsschutz · Kein Neugeschäft ab 2027'
+
+Explain:
+
+- existing contracts can generally continue;
+- users should not cancel automatically;
+- possible transfer or transition options must be checked individually;
+- costs, guarantees, allowances, and transfer conditions matter.
+
+Do not tell existing Riester users to cancel or transfer.
+
+FRÜHSTART-RENTE
+
+Use:
+
+status: 'planned'
+statusBadgeText:
+'Geplant · Noch nicht verfügbar'
+
+Explain:
+
+- a separate planned programme for children and young people;
+- not the same as the adult Altersvorsorgedepot;
+- final conditions depend on implementation;
+- do not present it as currently available.
+
+PHASE 6: ADD PROVIDER-BASED EDUCATIONAL EXAMPLES
+
+Use real provider conditions as the factual basis for educational examples.
+
+However, in lesson scenarios, anonymize providers as:
+
+- Angebot A
+- Angebot B
+- Angebot C
+
+Do not write the provider name inside the scenario question.
+
+Each anonymized example must be based on one real provider configuration from the provider data below.
+
+Store internal source metadata so the project remains maintainable, for example:
+
+interface ProviderExampleSource {
+  providerId: string;
+  providerName: string;
+  productName?: string;
+  sourceUrls: string[];
+  informationStatus: string;
+}
+
+Do not expose internal mapping in the answer choice itself.
+
+Suitable educational comparisons:
+
+EXAMPLE 1: FIXED FEE VERSUS PERCENTAGE COST
+
+Angebot A:
+Based on Fidelity Standard.
+
+- fixed fee: 1 € per month;
+- product costs: approximately 0.35 % per year.
+
+Angebot B:
+Based on Deka Standard.
+
+- no separate depot and allowance administration fee;
+- stated effective costs: approximately 0.10 % per year.
+
+Learning question:
+
+“Warum kann eine feste Gebühr von 12 € pro Jahr bei einem kleinen Depot besonders stark ins Gewicht fallen?”
+
+Expected concept:
+
+At 2,000 € capital, 12 € corresponds to approximately 0.6 % per year before product costs.
+
+Do not state that one provider is always better. Show that the effect changes with portfolio size.
+
+EXAMPLE 2: “0 €” DOES NOT ALWAYS MEAN ZERO TOTAL COST
+
+Angebot A:
+Based on ING Aktiv.
+
+- no own ING depot, savings-plan, order, or switching fee;
+- more than 1,000 ETFs and funds;
+- product costs start from approximately 0.03 %;
+- actual total cost depends on the selected products.
+
+Angebot B:
+Based on Trade Republic.
+
+- 0 € depot;
+- 0 € savings plans;
+- reimbursement of product costs applies only to selected eligible ETFs;
+- products outside the eligible list may create product or transaction costs.
+
+Learning question:
+
+“Welche Information fehlt, wenn in der Werbung nur ‘0 € Depotgebühr’ steht?”
+
+Expected concept:
+
+- product costs;
+- fund selection;
+- spreads;
+- order costs;
+- special conditions;
+- duration of reimbursements.
+
+EXAMPLE 3: TEMPORARY PROMOTION VERSUS PERMANENT CONDITION
+
+Angebot A:
+Based on Quirion.
+
+- 0 € depot fee at launch;
+- reimbursement of ETF costs at least during the first year;
+- later pricing is not yet fully confirmed.
+
+Angebot B:
+Based on SMARTBROKER+ Standard.
+
+- TER reimbursement for at least three years;
+- only up to an investment volume of 25,000 €;
+- later reimbursement may depend on additional conditions;
+- spreads may still apply.
+
+Learning question:
+
+“Welche drei Fragen musst du bei einem kostenlosen Startangebot stellen?”
+
+Expected answer:
+
+- Wie lange gilt die Aktion?
+- Bis zu welchem Anlagevolumen gilt sie?
+- Welche Kosten entstehen danach oder außerhalb der Aktion?
+
+EXAMPLE 4: SELF-DIRECTED CHOICE VERSUS AUTOMATIC STRUCTURE
+
+Angebot A:
+Based on ING Relax or Deka Standard.
+
+- limited, simple selection;
+- predefined stock and bond components;
+- easier to understand;
+- less personal choice.
+
+Angebot B:
+Based on ING Aktiv, DWS Select, or Scalable free depot.
+
+- broad or self-directed selection;
+- more decision-making responsibility;
+- costs depend on the selected products;
+- greater risk of choosing a complex or expensive configuration.
+
+Learning question:
+
+“Mehr Auswahl klingt gut. Welche zusätzliche Verantwortung entsteht dadurch?”
+
+Expected concept:
+
+The user must compare diversification, risk, product costs, suitability, and rebalancing.
+
+EXAMPLE 5: GUARANTEE VERSUS MARKET OPPORTUNITY
+
+Angebot A:
+Based on Allianz InvestFlex80 or the R+V 80 % guarantee product.
+
+- 80 % guarantee at the relevant retirement date;
+- mix of guarantee assets and investment components;
+- exact costs not yet fully published.
+
+Angebot B:
+Based on a non-guaranteed standard or free depot.
+
+- no contribution guarantee;
+- higher market fluctuation;
+- potentially greater long-term growth opportunity;
+- not guaranteed.
+
+Learning question:
+
+“Was ist der mögliche Preis einer Garantie?”
+
+Expected concept:
+
+A larger guaranteed component can reduce the share invested in growth-oriented assets and therefore reduce possible long-term returns.
+
+Do not phrase the guaranteed product as automatically bad.
+
+PHASE 7: ADD A FULL PROVIDER COMPARISON
+
+Add the full provider comparison after the user has completed the basic educational explanation and cost-check exercises.
+
+Do not place the table at the beginning of the lesson.
+
+Preferred location:
+
+- inside the existing “staat” lesson after the general cost-check;
+- or as an expandable “Anbieterübersicht” section linked from the lesson;
+- or as a separate section within the existing calculator/comparison area if such an area already exists.
+
+Do not create a new top-level route unless the existing architecture clearly uses dedicated overview routes.
+
+TITLE
+
+“Anbieterübersicht zum Altersvorsorgedepot”
+
+INTRO TEXT
+
+“Diese Übersicht zeigt veröffentlichte Anbieterinformationen mit Stand November 2026. Sie ist keine Empfehlung und ersetzt keine Prüfung der späteren Produktinformationsblätter, Effektivkostenquoten sowie Preis- und Leistungsverzeichnisse. Bedingungen können sich bis zur Zertifizierung und Markteinführung ändern.”
+
+TABLE COLUMNS
+
+Use responsive cards on small screens if a wide table is unreadable.
+
+Recommended columns:
+
+- Anbieter
+- Einfachster bestätigter Einstieg
+- Freie Auswahl
+- Garantie
+- Wichtige Einschränkung
+- Informationsstand
+- Quellen
+
+PROVIDER DATA
+
+1. Deka
+
+- access via Sparkassen;
+- Standard: global equity ETF and European bond ETF;
+- automatic risk reduction or user-managed equity allocation;
+- 0 € depot and allowance administration;
+- stated effective cost approximately 0.10 % per year;
+- managed product approximately 1.0–1.5 % depending on term;
+- no announced guarantee;
+- details still depend on final approval.
+
+Sources:
+https://www.deka.de/privatkunden/aktuelles-themen/informationen/altersvorsorge-reform
+https://altersvorsorgedepot-anbieter-vergleich.de/anbieter-monitor/dekabank/
+
+2. Union Investment
+
+- distribution through Volksbanken and Raiffeisenbanken;
+- UniVorsorge Basis approximately 0.55 % per year, potentially plus transaction costs;
+- UniVorsorge Pro approximately 1.0 % per year;
+- planned product with 100 % contribution guarantee;
+- final guaranteed-product price not publicly confirmed.
+
+Sources:
+https://www.union-investment.de/familien-und-altersvorsorge/fuers-alter-vorsorgen/altersvorsorgedepot
+https://zukunftsrechner.de/anbieter/union-investment
+
+3. DWS
+
+- distribution through Deutsche Bank and Postbank;
+- DWS VorsorgeDepot ETF approximately 0.42 %, approximately 0.44 % including indicated transaction costs;
+- Active ETFs approximately 0.60 %, approximately 0.77 % with indicated transaction costs;
+- Fonds approximately 0.65 %, approximately 0.77 % with indicated transaction costs;
+- Comfort approximately 1.13 %, approximately 1.25 % plus possible acquisition costs;
+- Select approximately 0.83–1.28 %, potentially up to 1.54 % plus possible acquisition costs;
+- no separate guarantee product announced;
+- Select may permit up to ten funds or ETFs from approximately 100 products.
+
+Sources:
+https://www.dws.de/informieren/altersvorsorge/das-neue-geplante-altersvorsorgedepot/
+https://altersvorsorgedepot-anbieter-vergleich.de/anbieter-monitor/dws/
+
+4. Fidelity International / FFB
+
+- confirmed Standard with a global equity ETF and Euro bond ETF;
+- equity allocation initially up to 100 %;
+- risk reduction begins ten years before retirement;
+- maximum equity allocation of 30 % at payout start;
+- 1 € per month plus approximately 0.35 % annual product costs;
+- no announced guarantee;
+- complete free-depot conditions not yet fully confirmed.
+
+Sources:
+https://www.fidelity.de/produkte-services/anlageloesungen/fidelity-vorsorgedepot/
+https://partner.fidelity.de/artikel/pressemitteilungen/2026-05-08-fidelity-international-launcht-altersvorsorgedepot-1778245491569
+
+5. Quirion / Quirin Privatbank
+
+- Standard based on Vanguard FTSE Global All-Cap and Vanguard Global Aggregate Bond EUR Hedged;
+- underlying TER approximately 0.07 % and 0.08 %;
+- 0 € depot fee at launch;
+- ETF cost reimbursement at least for the first year;
+- later pricing not finally published;
+- no announced guarantee.
+
+Sources:
+https://www.quirion.de/vorsorgen
+https://www.quirion.de/post/unser-neuer-standard-fuer-die-altersvorsorge
+https://neues-altersvorsorgedepot.de/anbieter/quirion
+
+6. ING
+
+ING Relax:
+- two predefined ETFs;
+- no own ING fees;
+- product costs approximately 0.20 % per year plus transaction costs.
+
+ING Aktiv:
+- self-directed selection;
+- more than 1,000 ETFs and funds;
+- no own ING depot, savings-plan, order, or switching fee;
+- product costs from approximately 0.03 % plus transaction costs;
+- no guarantee.
+
+Important:
+0.03 % is a starting cost for certain products, not a guaranteed all-in portfolio cost.
+
+Sources:
+https://www.ing.de/sparen-anlegen/altersvorsorge-depot/
+https://neues-altersvorsorgedepot.de/anbieter/ing
+
+7. Trade Republic
+
+- 0 € depot fee;
+- 0 € savings plans;
+- Standard may be free under the announced structure;
+- final ETF composition still to be confirmed;
+- ETF, government bond, and actively managed fund options within the eligible range;
+- product costs of selected BlackRock, Vanguard, and DWS ETFs may be reimbursed and reinvested;
+- other products or transactions may create costs;
+- no confirmed guarantee.
+
+Sources:
+https://traderepublic.com/de-de/altersvorsorgedepot
+https://finanzfacts.de/wiki/altersvorsorgedepot/anbieter/trade-republic/
+
+8. Scalable Capital
+
+- 0 € depot;
+- 0 € savings and payout plans;
+- automatic age-based allocation in the Standard product;
+- broader selection in the free version;
+- reimbursement for selected Scalable, BlackRock, DWS, and Vanguard ETFs through the Rentenbonus;
+- individual trades in the FREE model may cost 0.99 €;
+- special ETF lists and conditions can change;
+- no guarantee.
+
+Sources:
+https://de.scalable.capital/altersvorsorgedepot
+https://de.scalable.capital/newsroom/altersvorsorgedepot
+
+9. SMARTBROKER+
+
+- 0 € depot;
+- 0 € savings plans, excluding spreads and possible inducements;
+- 100 % TER reimbursement in Standard for at least the first three years;
+- reimbursement applies up to 25,000 € investment volume;
+- later reimbursement may depend on additional conditions;
+- free purchases in the free version may require a minimum trade size of 500 € through Gettex;
+- below 500 €, a 1 € fee may apply;
+- no guarantee.
+
+Sources:
+https://www.smartbrokerplus.de/de-de/altersvorsorgedepot/
+https://www.wiwo.de/vergleich/altersvorsorgedepot-smartbrokerplus/
+
+10. Allianz
+
+- Standard with two predefined ETFs and no capital guarantee;
+- InvestFlex with up to ten funds or ETFs;
+- InvestFlex80 with an 80 % guarantee at retirement;
+- lifelong pension or payout plan depending on the selected contract;
+- up to 30 % may be available as a one-time payment under applicable conditions without losing the allowance;
+- full final price and service documentation has not yet been published.
+
+Source:
+https://www.allianz.de/vorsorge/altersvorsorgedepot/
+
+11. R+V
+
+- three announced products from 1 January 2027;
+- Standard with predefined ETFs;
+- free product with active and passive funds or ETFs;
+- product with an 80 % guarantee for contributions and allowances;
+- lifelong pension or payout plan depending on the product;
+- complete final public pricing has not yet been published.
+
+Source:
+https://www.ruv.de/altersvorsorge/private-rentenversicherung/altersvorsorgedepot
+
+PROVIDER TABLE RULES
+
+1. Do not calculate a single overall winner.
+2. Do not add labels such as “best”, “recommended”, or “perfect for beginners”.
+3. Do not sort by affiliate value.
+4. Default sorting should be alphabetical.
+5. If sorting or filtering is added, allow users to filter objectively by:
+   - Standardprodukt;
+   - freie Auswahl;
+   - Garantie;
+   - veröffentlichte Kosten;
+   - Kosten noch nicht vollständig veröffentlicht.
+6. Show the date of the information.
+7. Show official sources first.
+8. Secondary sources may be included for cost details, but must not visually replace the official provider source.
+9. Clearly label:
+   - confirmed information;
+   - preliminary information;
+   - missing final price documentation.
+10. Link sources with descriptive accessible labels, not raw URLs.
+11. External links must open safely using rel="noopener noreferrer".
+12. Do not add affiliate parameters.
+13. Do not add tracking parameters.
+14. Do not present marketing names such as “0 %” without the corresponding limitation directly nearby.
+15. Never convert “from 0.03 %” into “total cost 0.03 %”.
+16. Never assume that a temporary reimbursement is permanent.
+17. Where final Produktinformationsblatt, Effektivkostenquote, or Preis- und Leistungsverzeichnis is missing, say so clearly.
+
+PHASE 8: CONNECT THE OTHER LESSONS
+
+ZINSESZINS
+
+Add a short bridge:
+
+“Im Altersvorsorgedepot können neben deinen eigenen Beiträgen auch staatliche Zulagen langfristig mitinvestiert werden. Die tatsächliche Entwicklung hängt von Rendite, Kosten und Laufzeit ab.”
+
+Add a link or bridge to the Altersvorsorgedepot calculator mode.
+
+ANLAGEKLASSEN
+
+Add:
+
+“Nicht jede Anlageklasse ist automatisch in einem geförderten Altersvorsorgedepot zulässig. Entscheidend sind die gesetzlichen Vorgaben, die Zertifizierung und die Produktauswahl des Anbieters.”
+
+Do not hardcode a permanent list of every permitted fund.
+
+KINDERGELD
+
+Rename the lesson title if necessary so “Kindergeld” is not confused with “Kinderzulage”.
+
+Preferred metadata:
+
+title: 'Sparen mit kleinen Beträgen'
+shortTitle: 'Kleine Beträge'
+subtitle:
+  'Wie du kleine Monatsbeträge zwischen Alltag, Reserve und Zukunft aufteilst.'
+
+Add a question explaining the difference between Kindergeld and Kinderzulage.
+
+TASCHENGELD
+
+Add an educational three-part distinction:
+
+- kurzfristige Reserve;
+- freies langfristiges Sparen;
+- gebundene Altersvorsorge.
+
+Do not suggest that the full monthly surplus should automatically go into the Altersvorsorgedepot.
+
+PHASE 9: UPDATE DAILY QUESTIONS AND DUPLICATED CONTENT
+
+Update all outdated daily questions.
+
+Remove or rewrite any question whose correct answer says:
+
+- Altersvorsorgedepot has not been adopted;
+- Altersvorsorgedepot is only a political proposal;
+- Frühstart-Rente and Altersvorsorgedepot are one programme;
+- new Riester contracts continue unchanged after 2027.
+
+Add at least three new daily questions:
+
+1. Grundzulage calculation.
+2. Difference between allowance and market return.
+3. Meaning of “0 € Depotgebühr” versus total costs.
+
+Ensure duplicated lesson content remains consistent across:
+
+- steps;
+- sections;
+- practicalExample;
+- merkeSummary;
+- quiz;
+- daily questions;
+- state-support data.
+
+PHASE 10: FINANCIAL EDUCATION SAFEGUARDS
+
+Use a short notice directly under model calculations:
+
+“Modellrechnung, keine garantierte Rendite.”
+
+Use a fuller expandable notice:
+
+“Diese Inhalte dienen ausschließlich der Finanzbildung und stellen keine Anlage-, Steuer- oder Rechtsberatung dar. Modellrechnungen beruhen auf Annahmen. Renditen, Kosten, Steuern und gesetzliche Regeln können sich verändern.”
+
+Do not show the long disclaimer after every question.
+
+Do not use aggressive marketing language such as:
+
+- “Sichere dir jetzt …”
+- “Verpasse keine Förderung …”
+- “Die beste Altersvorsorge …”
+- “Maximiere deine Rendite …”
+- “Garantiert reich im Alter …”
+
+Acceptable language includes:
+
+- “So funktioniert die Förderung.”
+- “Unter diesen Annahmen ergibt die Modellrechnung …”
+- “Vergleiche Kosten, Auswahl, Garantie und Auszahlungsbedingungen.”
+- “Welche Variante passt, hängt von Ziel, Laufzeit, Liquiditätsbedarf und Risikobereitschaft ab.”
+
+CALCULATION ARCHITECTURE
+
+Keep calculations in reusable pure functions rather than directly inside UI components.
+
+Use functions equivalent to:
+
+function calculateBasicAllowance(
+  annualContribution: number
+): number {
+  const eligibleContribution = Math.min(
+    Math.max(annualContribution, 0),
+    1800
+  );
+
+  const firstTier =
+    Math.min(eligibleContribution, 360) * 0.5;
+
+  const secondTier =
+    Math.max(
+      Math.min(eligibleContribution - 360, 1440),
+      0
+    ) * 0.25;
+
+  return firstTier + secondTier;
+}
+
+function calculateChildAllowance(
+  annualContribution: number,
+  eligibleChildren: number
+): number {
+  const allowancePerChild = Math.min(
+    Math.max(annualContribution, 0),
+    300
+  );
+
+  return allowancePerChild * Math.max(eligibleChildren, 0);
+}
+
+function calculateCareerStarterBonus(
+  ageAtContractStart: number
+): number {
+  return ageAtContractStart < 25 ? 200 : 0;
+}
+
+Keep the result fields separate:
+
+interface RetirementProjectionResult {
+  personalContributions: number;
+  basicAllowances: number;
+  childAllowances: number;
+  careerStarterBonus: number;
+  assumedMarketGrowth: number;
+  estimatedCosts: number;
+  projectedValueBeforeTax: number;
+}
+
+Do not combine all state support into one unexplained field.
+
+Use the project’s existing rounding, currency formatting, and localization utilities where available.
+
+Handle edge cases:
+
+- negative input;
+- retirement age below start age;
+- contribution above the supported maximum;
+- zero contribution;
+- zero return;
+- high cost assumption;
+- age 24 versus age 25 for the one-time bonus;
+- zero children;
+- mobile input behavior;
+- decimal separators in German locale.
+
+DESIGN AND UX REQUIREMENTS
+
+1. Preserve the current visual language.
+2. Keep each learning step focused on one core idea.
+3. Avoid long text walls.
+4. Use progressive disclosure for provider detail and legal notes.
+5. Ensure all tables are usable on mobile.
+6. Use cards or horizontal scrolling only if consistent with the existing project.
+7. Keep touch targets accessible.
+8. Preserve keyboard navigation.
+9. Add labels and accessible descriptions to sliders.
+10. Do not encode important status information only by color.
+11. Preserve dark/light theme behavior if the project supports themes.
+12. Do not introduce a separate provider design style.
+
+FINAL VALIDATION
+
+Before finishing:
+
+1. Search the complete repository again for outdated legal-status statements.
+2. Verify that Altersvorsorgedepot and Frühstart-Rente are separate.
+3. Verify that the provider table does not recommend a winner.
+4. Verify that anonymized lesson scenarios remain traceable to real provider data internally.
+5. Verify that all model calculations distinguish:
+   - own contributions;
+   - allowances;
+   - market development;
+   - costs;
+   - value before tax.
+6. Verify that no provider’s “0 €” statement is displayed without limitations.
+7. Verify that temporary reimbursements are not described as permanent.
+8. Verify that missing final price documentation is clearly marked.
+9. Run the existing type-check.
+10. Run the existing lint command.
+11. Run the existing tests if configured.
+12. Run the production build.
+13. Fix all errors caused by this implementation.
+14. Do not modify GitHub Actions.
+15. Do not create a second project or duplicate application.
+
+FINAL RESPONSE FORMAT
+
+After completing the implementation, return a concise report with:
+
+1. Existing files modified.
+2. New files created, with a one-line justification for each.
+3. Lesson content updated.
+4. Widgets and calculator functions added.
+5. Provider comparison implementation.
+6. Outdated statements removed.
+7. Validation commands executed and their results.
+8. Any remaining factual fields that are intentionally marked as preliminary.
+
+Do not respond only with a plan. Inspect and modify the existing imported project.

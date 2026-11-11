@@ -48,6 +48,11 @@ const GLOSSARY_ITEMS = [
     definition:
       'Kostenloser Auftrag an deine Bank, damit Kapitalerträge bis zum Sparer-Pauschbetrag (1.000 € pro Jahr für Alleinstehende) steuerfrei bleiben.',
   },
+  {
+    term: 'Gefördertes Altersvorsorgedepot (ab 2027)',
+    definition:
+      'Staatlich gefördertes Vorsorgedepot (Gesetz 2026 beschlossen, Produktstart ab 1. Januar 2027) mit bis zu 540 € jährlicher Grundzulage bei 1.800 € Eigenbeitrag, 200 € einmaligem Berufseinsteigerbonus unter 25 Jahren und Auszahlung grundsätzlich ab dem Rentenalter.',
+  },
 ];
 
 export function MehrPage() {
@@ -88,7 +93,7 @@ export function MehrPage() {
     <div className="mx-auto max-w-3xl space-y-7">
       <header className="surface-card p-6 sm:p-7 space-y-2">
         <span className="inline-flex items-center gap-1.5 rounded-xl bg-secondary px-3 py-1 text-xs font-bold text-secondary-foreground">
-          Menü & Einstellungen
+          Menü & Einstellungen · Rechts- und Informationsstand: November 2026
         </span>
         <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-foreground">
           Mehr
@@ -119,10 +124,10 @@ export function MehrPage() {
               </span>
               <div>
                 <p className="text-base font-extrabold text-foreground">
-                  Zinseszins- & Budget-Rechner
+                  Zinseszins-, Altersvorsorgedepot- & Budget-Rechner
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Sparrate, Laufzeit und monatliche Lernaufteilung interaktiv berechnen
+                  Sparrate, staatliche Zulagen (ab 2027), Laufzeit und monatliche Lernaufteilung interaktiv berechnen
                 </p>
               </div>
             </div>
@@ -145,7 +150,7 @@ export function MehrPage() {
                     Kompakt-Glossar der wichtigsten Begriffe
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    Inflation, Notgroschen, ETF, Diversifikation & Freistellungsauftrag kurz erklärt
+                    Inflation, Notgroschen, ETF, Diversifikation, Freistellungsauftrag & Altersvorsorgedepot kurz erklärt
                   </p>
                 </div>
               </div>
@@ -218,7 +223,7 @@ export function MehrPage() {
                   GeldStart richtet sich an 16- bis 20-Jährige in Schule, Ausbildung, Studium oder beim ersten eigenen Gehalt. Jedes Modul zerlegt komplexe Finanzthemen in leicht verdauliche Schritte mit direktem Alltagsbezug.
                 </p>
                 <p>
-                  Wir nennen bewusst keine einzelnen Banken oder Broker als Empfehlung, sondern zeigen dir die zugrundeliegenden Prinzipien: Notgroschen, Risikostreuung, Kostenbewusstsein und langfristiges Denken.
+                  Wir empfehlen bewusst keinen einzelnen Anbieter als „Testsieger“, sondern zeigen dir die zugrundeliegenden Prinzipien: Notgroschen, Risikostreuung, Kostenbewusstsein, Förderbedingungen und langfristiges Denken.
                 </p>
               </div>
             )}
@@ -240,7 +245,7 @@ export function MehrPage() {
                     Rechtlicher Bildungshinweis
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    Keine Anlage-, Steuer- oder Rechtsberatung
+                    Keine Anlage-, Steuer- oder Rechtsberatung (Stand: November 2026)
                   </p>
                 </div>
               </div>
@@ -254,10 +259,10 @@ export function MehrPage() {
             {openSection === 'legal' && (
               <div className="border-t border-border bg-secondary/30 p-5 text-sm text-muted-foreground space-y-2 leading-relaxed">
                 <p>
-                  Sämtliche Inhalte, Rechenbeispiele und das virtuelle Übungsdepot in GeldStart dienen ausschließlich der allgemeinen Finanzbildung. Sie stellen ausdrücklich keine Anlageberatung, Empfehlung oder Aufforderung zum Kauf oder Verkauf von Finanzinstrumenten dar.
+                  Diese Inhalte dienen ausschließlich der Finanzbildung und stellen keine Anlage-, Steuer- oder Rechtsberatung dar. Modellrechnungen beruhen auf Annahmen. Renditen, Kosten, Steuern und gesetzliche Regeln können sich verändern.
                 </p>
                 <p>
-                  Wertpapiergeschäfte am Kapitalmarkt sind mit Kursrisiken bis hin zum Kapitalverlust verbunden. Vergangene Wertentwicklungen und Beispielrechnungen sind keine Garantie für zukünftige Erträge.
+                  Wertpapiergeschäfte am Kapitalmarkt sind mit Kursrisiken bis hin zum Kapitalverlust verbunden. Vergangene Wertentwicklungen und Beispielrechnungen sind keine Garantie für zukünftige Erträge. Rechts- und Informationsstand: November 2026.
                 </p>
               </div>
             )}

@@ -33,10 +33,19 @@ export interface PracticalExample {
   takeaway: string;
 }
 
+export interface ProviderExampleSource {
+  providerId: string;
+  providerName: string;
+  productName?: string;
+  sourceUrls: string[];
+  informationStatus: string;
+}
+
 export interface StepMoreInfo {
   title: string;
   points: string[];
   sourceNote?: string;
+  exampleSources?: ProviderExampleSource[];
 }
 
 export type LessonVisualMotif =
@@ -52,7 +61,13 @@ export type LessonVisualMotif =
   | 'pay-first'
   | 'pension-balance'
   | 'cost-warning'
-  | 'abo-check';
+  | 'abo-check'
+  | 'allowance-stack'
+  | 'contribution-breakdown'
+  | 'tax-timeline'
+  | 'three-product-paths'
+  | 'locked-until-retirement'
+  | 'provider-check';
 
 export type InteractiveStepWidget =
   | 'inflation-slider'
@@ -61,7 +76,11 @@ export type InteractiveStepWidget =
   | 'small-amounts-slider'
   | 'retirement-slider'
   | 'state-status-checker'
-  | 'budget-mini';
+  | 'budget-mini'
+  | 'allowance-slider'
+  | 'retirement-breakdown'
+  | 'cost-impact-slider'
+  | 'provider-comparison';
 
 export interface IntroStep {
   id: string;
@@ -105,6 +124,21 @@ export interface ComparisonStep {
   moreInfo?: StepMoreInfo;
 }
 
+export interface TripleComparisonStep {
+  id: string;
+  type: 'triple_comparison';
+  kicker: string;
+  title: string;
+  body: string;
+  cards: [
+    ComparisonCardItem,
+    ComparisonCardItem,
+    ComparisonCardItem,
+  ];
+  takeaway: string;
+  moreInfo?: StepMoreInfo;
+}
+
 export interface VisualChoiceOption {
   id: string;
   label: string;
@@ -137,6 +171,7 @@ export interface QuestionStep {
   explanationCorrect: string;
   explanationWrong: string;
   moreInfo?: StepMoreInfo;
+  exampleSources?: ProviderExampleSource[];
 }
 
 export interface ScenarioFact {
@@ -158,6 +193,7 @@ export interface ScenarioStep {
   explanationCorrect: string;
   explanationWrong: string;
   moreInfo?: StepMoreInfo;
+  exampleSources?: ProviderExampleSource[];
 }
 
 export interface InteractiveStep {
@@ -188,6 +224,7 @@ export type LessonStep =
   | IntroStep
   | ExplanationStep
   | ComparisonStep
+  | TripleComparisonStep
   | VisualChoiceStep
   | QuestionStep
   | ScenarioStep
@@ -240,7 +277,7 @@ export interface AssetClassProfile {
 export interface StateSupportProgram {
   id: string;
   name: string;
-  status: 'active' | 'planned' | 'changing';
+  status: 'active' | 'available-soon' | 'planned' | 'legacy' | 'changing';
   statusBadgeText: string;
   standNote: string;
   summary: string;
@@ -248,6 +285,44 @@ export interface StateSupportProgram {
   howItWorks: string[];
   importantConditions: string;
   verificationSource: string;
+}
+
+export interface ProviderSourceLink {
+  label: string;
+  url: string;
+  isOfficial: boolean;
+}
+
+export interface AltersvorsorgedepotProviderEntry {
+  id: string;
+  providerName: string;
+  accessNote: string;
+  simplestConfirmedEntry: string;
+  freeChoice: string;
+  guarantee: string;
+  importantLimitation: string;
+  informationStatusText: string;
+  informationDate: string;
+  hasStandardProduct: boolean;
+  hasFreeChoice: boolean;
+  hasGuarantee: boolean;
+  hasPublishedCosts: boolean;
+  hasMissingFinalPricing: boolean;
+  sources: ProviderSourceLink[];
+}
+
+export interface AnonymizedProviderLearningExample {
+  id: string;
+  title: string;
+  kicker: string;
+  offerALabel: string;
+  offerASummary: string[];
+  offerBLabel: string;
+  offerBSummary: string[];
+  question: string;
+  expectedConcept: string;
+  takeaway: string;
+  internalSources: ProviderExampleSource[];
 }
 
 export interface DailyQuestionItem {
@@ -402,7 +477,7 @@ export const STATE_SUPPORT_PROGRAMS: StateSupportProgram[] = [
     name: 'Vermögenswirksame Leistungen (VL)',
     status: 'active',
     statusBadgeText: 'Aktiv · Bestehende Regelung',
-    standNote: 'Stand: 2025/2026',
+    standNote: 'Rechts- und Informationsstand: November 2026',
     summary:
       'Viele Arbeitgeber zahlen Auszubildenden und Beschäftigten freiwillig oder per Tarifvertrag bis zu 40 € monatlich zusätzlich zum Gehalt in einen VL-Sparvertrag.',
     whoIsItFor: 'Auszubildende, Angestellte, Beamte und dual Studierende (je nach Tarif- oder Arbeitsvertrag)',
@@ -420,7 +495,7 @@ export const STATE_SUPPORT_PROGRAMS: StateSupportProgram[] = [
     name: 'Arbeitnehmersparzulage',
     status: 'active',
     statusBadgeText: 'Aktiv · Staatlicher Zuschuss',
-    standNote: 'Stand: 2025/2026',
+    standNote: 'Rechts- und Informationsstand: November 2026',
     summary:
       'Wenn du vermögenswirksame Leistungen (VL) in einen geförderten Vertrag (z. B. Aktienfondssparplan oder Bausparvertrag) anlegst, legt der Staat innerhalb der Einkommensgrenzen jährlich eine Zulage obendrauf.',
     whoIsItFor:
@@ -439,7 +514,7 @@ export const STATE_SUPPORT_PROGRAMS: StateSupportProgram[] = [
     name: 'Wohnungsbauprämie (inkl. U25-Sonderregel)',
     status: 'active',
     statusBadgeText: 'Aktiv · Mit Bedingungen',
-    standNote: 'Stand: 2025/2026',
+    standNote: 'Rechts- und Informationsstand: November 2026',
     summary:
       'Staatlicher Zuschuss auf eigene Einzahlungen in einen Bausparvertrag (ab 16 Jahren). Für unter 25-Jährige gibt es eine gesetzliche Ausnahmeregel bei der Verwendung.',
     whoIsItFor:
@@ -453,42 +528,662 @@ export const STATE_SUPPORT_PROGRAMS: StateSupportProgram[] = [
     verificationSource: 'Verbraucherzentrale & unabhängige Finanzberatung',
   },
   {
-    id: 'riester',
-    name: 'Riester-Förderung & Berufseinsteiger-Bonus',
-    status: 'changing',
-    statusBadgeText: 'Aktiv · Reformen in Diskussion',
-    standNote: 'Stand: 2025/2026',
+    id: 'altersvorsorgedepot-2027',
+    name: 'Gefördertes Altersvorsorgedepot',
+    status: 'available-soon',
+    statusBadgeText: 'Beschlossen · Produkte ab 01.01.2027',
+    standNote: 'Rechts- und Informationsstand: November 2026',
     summary:
-      'Staatlich geförderte private Altersvorsorge mit Grundzulage und einem einmaligen Berufseinsteiger-Bonus für junge Sparer unter 25 Jahren.',
+      'Zertifizierte private Altersvorsorge mit eigenem Beitrag, beitragsabhängiger staatlicher Zulage und möglichen Kapitalmarktanlagen.',
     whoIsItFor:
-      'Rentenversicherungspflichtige Beschäftigte und Auszubildende, die den erforderlichen Mindesteigenbeitrag einzahlen',
+      'Förderberechtigte Sparerinnen und Sparer, die ab dem 1. Januar 2027 einen zertifizierten Altersvorsorgevertrag abschließen',
     howItWorks: [
-      'Für die volle Zulage müssen mindestens 4 % des Vorjahres-Bruttoeinkommens (abzgl. Zulage, mind. 60 € Sockelbetrag) eingezahlt werden.',
-      'Unter 25-Jährige können im ersten Förderjahr einen einmaligen Berufseinsteiger-Bonus erhalten.',
+      'Die gesetzliche Grundlage wurde 2026 beschlossen. Zertifizierte Produkte sollen ab dem 1. Januar 2027 angeboten werden.',
+      'Für die ersten 360 € Jahresbeitrag gibt es in diesem Modell 50 Cent Grundzulage je Euro, für weitere Beiträge bis 1.800 € jährlich 25 Cent je Euro (maximal 540 € Grundzulage pro Jahr).',
+      'Zusätzlich sind eine Kinderzulage (bis zu 300 € pro Kind und Jahr) sowie bei Vertragsabschluss vor dem 25. Geburtstag ein einmaliger Berufseinsteigerbonus von 200 € möglich.',
     ],
     importantConditions:
-      'Viele bestehende Riester-Verträge haben hohe Abschluss- und Verwaltungskosten sowie eine Bindung bis zum Rentenalter. Die Politik diskutiert über Reformen.',
+      'Maximal geförderter Eigenbeitrag von 1.800 € pro Jahr in diesem Modell (maximale Grundzulage: 540 € pro Jahr). Eingeschränkte Verfügbarkeit vor dem Rentenbeginn, spätere Auszahlungen sind grundsätzlich steuerpflichtig, und die konkreten Konditionen hängen vom jeweiligen zertifizierten Vertrag ab.',
+    verificationSource: 'Bundesministerium der Finanzen, Zertifizierungsstelle & Produktinformationsblatt des Anbieters',
+  },
+  {
+    id: 'riester',
+    name: 'Bestehende Riester-Verträge (Bestandsschutz)',
+    status: 'legacy',
+    statusBadgeText: 'Bestandsschutz · Kein Neugeschäft ab 2027',
+    standNote: 'Rechts- und Informationsstand: November 2026',
+    summary:
+      'Bestehende Riester-Verträge genießen Bestandsschutz und können grundsätzlich weitergeführt werden; neue klassische Riester-Verträge werden ab 2027 durch das neue Fördersystem abgelöst.',
+    whoIsItFor:
+      'Sparerinnen und Sparer, die bereits einen bestehenden Riester-Vertrag besitzen',
+    howItWorks: [
+      'Bestehende Verträge laufen grundsätzlich weiter und sollten nicht unüberlegt oder automatisch gekündigt werden.',
+      'Ob ein Weiterführen, Beitragsfreistellen oder ein späterer Wechsel in ein neues Altersvorsorgedepot sinnvoll ist, muss individuell anhand des konkreten Vertrags geprüft werden.',
+    ],
+    importantConditions:
+      'Entscheidend sind laufende Kosten, bereits gezahlte Abschlussgebühren, vorhandene Beitragsgarantien, Zulagenansprüche und die konkreten Wechselbedingungen.',
     verificationSource: 'Deutsche Rentenversicherung (Ihre Vorsorge) & Verbraucherzentrale',
   },
   {
-    id: 'fruehstart-altersvorsorgedepot',
-    name: 'Frühstart-Rente & gefördertes Altersvorsorgedepot',
+    id: 'fruehstart-rente',
+    name: 'Frühstart-Rente',
     status: 'planned',
-    statusBadgeText: 'Geplant · Noch nicht in Kraft',
-    standNote: 'Stand: 2025/2026 (Politisches Vorhaben)',
+    statusBadgeText: 'Geplant · Noch nicht verfügbar',
+    standNote: 'Rechts- und Informationsstand: November 2026',
     summary:
-      'In der Politik werden Konzepte wie eine staatlich bezuschusste „Frühstart-Rente“ sowie ein steuerlich gefördertes „Altersvorsorgedepot“ diskutiert.',
+      'Ein separates geplantes Förderkonzept für Kinder und Jugendliche – nicht identisch mit dem ab 2027 startenden Altersvorsorgedepot für eigene Beiträge.',
     whoIsItFor:
-      'Aktuell noch für niemanden abschließbar – es handelt sich um politische Vorschläge, die noch nicht als Gesetz beschlossen und nicht aktiv sind.',
+      'Geplantes Programm für Kinder und Jugendliche; derzeit noch nicht als abschließbares Produkt verfügbar',
     howItWorks: [
-      'Diskutiert wird, private Altersvorsorge künftig stärker über kostengünstige Wertpapierdepots (z. B. mit ETFs) zu fördern.',
-      'Auch ein staatlicher Startbeitrag für junge Menschen („Frühstart-Rente“) wurde vorgeschlagen.',
+      'Die Frühstart-Rente ist ein eigenständiges Vorhaben und muss klar vom geförderten Altersvorsorgedepot unterschieden werden.',
+      'Ob, wann und mit welchen genauen Bedingungen das Programm startet, hängt von der endgültigen gesetzlichen und technischen Umsetzung ab.',
     ],
     importantConditions:
-      'Wichtig: Verlass dich bei deiner Planung niemals auf Gesetzesentwürfe, die noch nicht in Kraft getreten sind.',
+      'Noch nicht verfügbar: Plane nur mit Förderprogrammen, deren gesetzliche Regeln und zertifizierte Angebote tatsächlich verfügbar sind.',
     verificationSource: 'Bundesministerium der Finanzen & Verbraucherzentralen',
   },
 ];
+
+export const ANONYMIZED_PROVIDER_EXAMPLES: AnonymizedProviderLearningExample[] = [
+  {
+    id: 'example-1-fixed-vs-percent',
+    title: 'Beispiel 1: Feste Grundgebühr vs. prozentuale Kosten',
+    kicker: 'Kosten-Mechanik · Kleines vs. größeres Guthaben',
+    offerALabel: 'Angebot A (Feste Monatsgebühr + Produktkosten)',
+    offerASummary: [
+      'Feste Gebühr: 1 € pro Monat (12 € pro Jahr)',
+      'Laufende Produktkosten: ca. 0,35 % pro Jahr',
+      'Standarddepot mit globalem Aktien-ETF und Euro-Anleihen-ETF',
+    ],
+    offerBLabel: 'Angebot B (Prozentuale Effektivkosten)',
+    offerBSummary: [
+      'Keine separate Depot- und Zulagenverwaltungsgebühr',
+      'Genannte Effektivkosten im Standardmodell: ca. 0,10 % pro Jahr',
+      'Standarddepot mit globalem Aktien-ETF und europäischem Anleihen-ETF',
+    ],
+    question:
+      'Warum kann eine feste Gebühr von 12 € pro Jahr bei einem kleinen Depot besonders stark ins Gewicht fallen?',
+    expectedConcept:
+      'Bei 2.000 € Guthaben entsprechen 12 € bereits 0,60 % pro Jahr – noch vor den laufenden Produktkosten. Mit wachsendem Depotvolumen sinkt das prozentuale Gewicht der festen Gebühr.',
+    takeaway:
+      'Kein Gebührenmodell ist pauschal für jede Depotgröße gleich: Feste Euro-Gebühren belasten kleine Startguthaben prozentual stärker, während bei großen Depots die laufenden Prozentkosten dominieren.',
+    internalSources: [
+      {
+        providerId: 'fidelity',
+        providerName: 'Fidelity International / FFB',
+        productName: 'Fidelity Vorsorgedepot Standard',
+        sourceUrls: [
+          'https://www.fidelity.de/produkte-services/anlageloesungen/fidelity-vorsorgedepot/',
+          'https://partner.fidelity.de/artikel/pressemitteilungen/2026-05-08-fidelity-international-launcht-altersvorsorgedepot-1778245491569',
+        ],
+        informationStatus: 'Stand November 2026 · Standardmodell angekündigt',
+      },
+      {
+        providerId: 'deka',
+        providerName: 'Deka',
+        productName: 'Deka Altersvorsorgedepot Standard',
+        sourceUrls: [
+          'https://www.deka.de/privatkunden/aktuelles-themen/informationen/altersvorsorge-reform',
+          'https://altersvorsorgedepot-anbieter-vergleich.de/anbieter-monitor/dekabank/',
+        ],
+        informationStatus: 'Stand November 2026 · Richtwerte vorbehaltlich endgültiger Freigabe',
+      },
+    ],
+  },
+  {
+    id: 'example-2-zero-euro-advertising',
+    title: 'Beispiel 2: „0 € Depotgebühr“ heißt nicht automatisch 0 € Gesamtkosten',
+    kicker: 'Werbebegriffe prüfen · Gesamtkosten verstehen',
+    offerALabel: 'Angebot A (Selbstgesteuertes Depot ab 0,03 % Produktkosten)',
+    offerASummary: [
+      '0 € eigene Depot-, Sparplan-, Order- oder Wechselgebühr des Anbieters',
+      'Über 1.000 ETFs und Fonds zur Auswahl',
+      'Laufende Produktkosten starten ab ca. 0,03 % p. a. zzgl. Transaktionskosten',
+      'Tatsächliche Gesamtkosten hängen von den selbst gewählten Produkten ab',
+    ],
+    offerBLabel: 'Angebot B (0 € Depot mit Kostenerstattung für ausgewählte ETFs)',
+    offerBSummary: [
+      '0 € Depotgebühr und 0 € für Sparpläne',
+      'Erstattung der Produktkosten gilt nur für ausgewählte förderfähige Partner-ETFs',
+      'Produkte außerhalb dieser Auswahl oder einzelne Transaktionen können Kosten verursachen',
+    ],
+    question:
+      'Welche Information fehlt, wenn in der Werbung nur „0 € Depotgebühr“ steht?',
+    expectedConcept:
+      'Es fehlen Angaben zu laufenden Produktkosten (TER), Fondsauswahl, Börsenspreads, Ordergebühren, Sonderbedingungen und zur Dauer möglicher Kostenerstattungen.',
+    takeaway:
+      'Prüfe neben der Depotgebühr immer die Effektivkostenquote, mögliche Transaktionskosten, Spreads und ob günstige Konditionen nur für eine eingeschränkte ETF-Liste gelten.',
+    internalSources: [
+      {
+        providerId: 'ing',
+        providerName: 'ING',
+        productName: 'ING Aktiv',
+        sourceUrls: [
+          'https://www.ing.de/sparen-anlegen/altersvorsorge-depot/',
+          'https://neues-altersvorsorgedepot.de/anbieter/ing',
+        ],
+        informationStatus: 'Stand November 2026 · Veröffentlichte Konditionen',
+      },
+      {
+        providerId: 'traderepublic',
+        providerName: 'Trade Republic',
+        productName: 'Trade Republic Altersvorsorgedepot',
+        sourceUrls: [
+          'https://traderepublic.com/de-de/altersvorsorgedepot',
+          'https://finanzfacts.de/wiki/altersvorsorgedepot/anbieter/trade-republic/',
+        ],
+        informationStatus: 'Stand November 2026 · Vorläufige Ankündigung',
+      },
+    ],
+  },
+  {
+    id: 'example-3-temporary-promotion',
+    title: 'Beispiel 3: Befristete Startaktion vs. dauerhafte Vertragsbedingung',
+    kicker: 'Aktionsbedingungen · Laufzeit & Volumen prüfen',
+    offerALabel: 'Angebot A (Kostenerstattung mindestens im 1. Jahr)',
+    offerASummary: [
+      '0 € Depotgebühr zum Marktstart',
+      'Erstattung der laufenden ETF-Kosten mindestens im ersten Jahr',
+      'Spätere dauerhafte Preisgestaltung ist noch nicht abschließend bestätigt',
+    ],
+    offerBLabel: 'Angebot B (TER-Erstattung für 3 Jahre bis 25.000 €)',
+    offerBSummary: [
+      'TER-Erstattung im Standardmodell für mindestens drei Jahre',
+      'Begrenzt auf ein Anlagevolumen von bis zu 25.000 €',
+      'Spätere Erstattung kann von weiteren Bedingungen abhängen; Spreads fallen weiterhin an',
+    ],
+    question:
+      'Welche drei Fragen musst du bei einem kostenlosen Startangebot stellen?',
+    expectedConcept:
+      '1. Wie lange gilt die Aktion? 2. Bis zu welchem Anlagevolumen gilt sie? 3. Welche Kosten entstehen danach oder außerhalb der Aktion?',
+    takeaway:
+      'Ein Altersvorsorgevertrag läuft oft über mehrere Jahrzehnte. Ein Aktionsvorteil für ein bis drei Jahre ersetzt keine transparente langfristige Kostenregelung.',
+    internalSources: [
+      {
+        providerId: 'quirion',
+        providerName: 'Quirion / Quirin Privatbank',
+        productName: 'Quirion Standard Altersvorsorgedepot',
+        sourceUrls: [
+          'https://www.quirion.de/vorsorgen',
+          'https://www.quirion.de/post/unser-neuer-standard-fuer-die-altersvorsorge',
+          'https://neues-altersvorsorgedepot.de/anbieter/quirion',
+        ],
+        informationStatus: 'Stand November 2026 · Startaktion angekündigt, Folgekosten noch offen',
+      },
+      {
+        providerId: 'smartbroker',
+        providerName: 'SMARTBROKER+',
+        productName: 'SMARTBROKER+ Standard',
+        sourceUrls: [
+          'https://www.smartbrokerplus.de/de-de/altersvorsorgedepot/',
+          'https://www.wiwo.de/vergleich/altersvorsorgedepot-smartbrokerplus/',
+        ],
+        informationStatus: 'Stand November 2026 · Befristete TER-Erstattung angekündigt',
+      },
+    ],
+  },
+  {
+    id: 'example-4-choice-vs-structure',
+    title: 'Beispiel 4: Eigene Fondsauswahl vs. automatische Standardstruktur',
+    kicker: 'Produkttypen · Auswahl & Eigenverantwortung',
+    offerALabel: 'Angebot A (Standardisierte Struktur mit 2 Bausteinen)',
+    offerASummary: [
+      'Begrenzte, übersichtliche Auswahl mit vordefiniertem Aktien- und Anleihen-ETF',
+      'Leichter nachvollziehbar ohne eigene Fondsrecherche',
+      'Weniger individuelle Eingriffsmöglichkeiten',
+    ],
+    offerBLabel: 'Angebot B (Breite freie Auswahl aus 100 bis über 1.000 Produkten)',
+    offerBSummary: [
+      'Breite oder selbstgesteuerte Auswahl an zulässigen ETFs und Fonds',
+      'Mehr eigene Entscheidungsverantwortung für Gewichtung und Risikostreuung',
+      'Gesamtkosten hängen stark von den selbst gewählten Produkten ab',
+    ],
+    question:
+      'Mehr Auswahl klingt gut. Welche zusätzliche Verantwortung entsteht dadurch?',
+    expectedConcept:
+      'Wer frei auswählt, muss Risikostreuung (Diversifikation), Schwankungsrisiko, laufende Produktkosten, Eignung und das spätere Umschichten (Rebalancing) selbst prüfen.',
+    takeaway:
+      'Eine große Fondsliste ist nur dann ein Vorteil, wenn du Kosten, Streuung und Risikoverlauf über Jahrzehnte selbst überblicken möchtest.',
+    internalSources: [
+      {
+        providerId: 'ing',
+        providerName: 'ING',
+        productName: 'ING Relax / ING Aktiv',
+        sourceUrls: [
+          'https://www.ing.de/sparen-anlegen/altersvorsorge-depot/',
+          'https://neues-altersvorsorgedepot.de/anbieter/ing',
+        ],
+        informationStatus: 'Stand November 2026 · Veröffentlichte Produktstruktur',
+      },
+      {
+        providerId: 'dws',
+        providerName: 'DWS',
+        productName: 'DWS VorsorgeDepot Select',
+        sourceUrls: [
+          'https://www.dws.de/informieren/altersvorsorge/das-neue-geplante-altersvorsorgedepot/',
+          'https://altersvorsorgedepot-anbieter-vergleich.de/anbieter-monitor/dws/',
+        ],
+        informationStatus: 'Stand November 2026 · Veröffentlichte Produktvarianten',
+      },
+      {
+        providerId: 'scalable',
+        providerName: 'Scalable Capital',
+        productName: 'Scalable Altersvorsorgedepot',
+        sourceUrls: [
+          'https://de.scalable.capital/altersvorsorgedepot',
+          'https://de.scalable.capital/newsroom/altersvorsorgedepot',
+        ],
+        informationStatus: 'Stand November 2026 · Vorläufige Produktankündigung',
+      },
+    ],
+  },
+  {
+    id: 'example-5-guarantee-vs-opportunity',
+    title: 'Beispiel 5: Beitragsgarantie vs. offene Marktchance',
+    kicker: 'Sicherheitsbaustein · Preis einer Garantie',
+    offerALabel: 'Angebot A (Garantieprodukt mit 80 % Absicherung)',
+    offerASummary: [
+      '80 % Garantie für eingezahlte Beiträge und Zulagen zum vereinbarten Rentenbeginn',
+      'Kombination aus Sicherungsvermögen und renditeorientierten Anlagebausteinen',
+      'Vollständige endgültige Preisangaben sind noch nicht veröffentlicht',
+    ],
+    offerBLabel: 'Angebot B (Depot ohne Beitragsgarantie)',
+    offerBSummary: [
+      'Keine Beitragsgarantie zum Rentenbeginn',
+      'Stärkere Wertschwankungen während der Laufzeit möglich',
+      'Höherer Anteil kann langfristig in chancenorientierten Sachwerten investiert bleiben (nicht garantiert)',
+    ],
+    question: 'Was ist der mögliche Preis einer Garantie?',
+    expectedConcept:
+      'Ein größerer Sicherheitsbaustein verringert den Anteil, der in wachstumsorientierte Anlagen wie Aktien-ETFs fließen kann, und kann dadurch die mögliche langfristige Rendite senken.',
+    takeaway:
+      'Garantien sind weder automatisch schlecht noch automatisch besser: Sie begrenzen das Verlustrisiko zum Stichtag, kosten aber oft Renditechancen und zusätzliche Gebühren.',
+    internalSources: [
+      {
+        providerId: 'allianz',
+        providerName: 'Allianz',
+        productName: 'Allianz InvestFlex80',
+        sourceUrls: ['https://www.allianz.de/vorsorge/altersvorsorgedepot/'],
+        informationStatus: 'Stand November 2026 · Produktstruktur angekündigt, Preisunterlagen noch offen',
+      },
+      {
+        providerId: 'ruv',
+        providerName: 'R+V',
+        productName: 'R+V Altersvorsorgedepot mit 80 % Garantie',
+        sourceUrls: [
+          'https://www.ruv.de/altersvorsorge/private-rentenversicherung/altersvorsorgedepot',
+        ],
+        informationStatus: 'Stand November 2026 · Produktstruktur angekündigt, Preisunterlagen noch offen',
+      },
+    ],
+  },
+];
+
+/**
+ * Alphabetically sorted list of published provider information (Stand: November 2026).
+ * Strictly neutral educational overview without rankings, recommendations, or affiliate parameters.
+ */
+export const ALTERSVORSORGEDEPOT_PROVIDERS: AltersvorsorgedepotProviderEntry[] = [
+  {
+    id: 'allianz',
+    providerName: 'Allianz',
+    accessNote: 'Versicherungs- und Vorsorgeanbieter',
+    simplestConfirmedEntry:
+      'Standarddepot mit zwei vordefinierten ETFs ohne Kapitalgarantie; Auszahlung als lebenslange Rente oder Auszahlplan je nach Vertrag (bis zu 30 % Einmalauszahlung unter geltenden Bedingungen förderunschädlich möglich).',
+    freeChoice:
+      'InvestFlex mit Auswahl aus bis zu zehn Fonds oder ETFs.',
+    guarantee:
+      'InvestFlex80 mit 80 % Garantie zum Rentenbeginn.',
+    importantLimitation:
+      'Vollständige endgültige Preis- und Leistungsunterlagen (Produktinformationsblatt, Effektivkostenquote) sind noch nicht veröffentlicht.',
+    informationStatusText:
+      'Vorläufige Produktankündigung · Endgültige Preisunterlagen fehlen noch',
+    informationDate: 'November 2026',
+    hasStandardProduct: true,
+    hasFreeChoice: true,
+    hasGuarantee: true,
+    hasPublishedCosts: false,
+    hasMissingFinalPricing: true,
+    sources: [
+      {
+        label: 'Offizielle Anbieterseite: Allianz Altersvorsorgedepot',
+        url: 'https://www.allianz.de/vorsorge/altersvorsorgedepot/',
+        isOfficial: true,
+      },
+    ],
+  },
+  {
+    id: 'deka',
+    providerName: 'Deka',
+    accessNote: 'Zugang über Sparkassen',
+    simplestConfirmedEntry:
+      'Standarddepot mit globalem Aktien-ETF und europäischem Anleihen-ETF; automatische Risikoreduzierung oder selbst gesteuerte Aktienquote; 0 € Depot- und Zulagenverwaltung; genannte Effektivkosten ca. 0,10 % p. a.',
+    freeChoice:
+      'Gemanagte Variante ca. 1,0–1,5 % p. a. je nach Laufzeit.',
+    guarantee:
+      'Kein Garantieprodukt angekündigt.',
+    importantLimitation:
+      '0 € bezieht sich auf die Depot- und Zulagenverwaltung, nicht auf laufende Produktkosten; Details stehen noch unter dem Vorbehalt der endgültigen Zertifizierung.',
+    informationStatusText:
+      'Veröffentlichte Richtwerte · Details vorbehaltlich endgültiger Freigabe',
+    informationDate: 'November 2026',
+    hasStandardProduct: true,
+    hasFreeChoice: true,
+    hasGuarantee: false,
+    hasPublishedCosts: true,
+    hasMissingFinalPricing: false,
+    sources: [
+      {
+        label: 'Offizielle Anbieterseite: Deka Altersvorsorge-Reform',
+        url: 'https://www.deka.de/privatkunden/aktuelles-themen/informationen/altersvorsorge-reform',
+        isOfficial: true,
+      },
+      {
+        label: 'Ergänzende Kosteneinordnung: Anbieter-Monitor DekaBank',
+        url: 'https://altersvorsorgedepot-anbieter-vergleich.de/anbieter-monitor/dekabank/',
+        isOfficial: false,
+      },
+    ],
+  },
+  {
+    id: 'dws',
+    providerName: 'DWS',
+    accessNote: 'Vertrieb über Deutsche Bank und Postbank',
+    simplestConfirmedEntry:
+      'DWS VorsorgeDepot ETF ca. 0,42 % p. a. (ca. 0,44 % inkl. ausgewiesener Transaktionskosten); Active ETFs ca. 0,60 % (ca. 0,77 % inkl. Transaktionskosten); Fonds ca. 0,65 % (ca. 0,77 % inkl. Transaktionskosten).',
+    freeChoice:
+      'Comfort ca. 1,13 % (ca. 1,25 % zzgl. möglicher Abschlusskosten); Select ca. 0,83–1,28 % (potenziell bis 1,54 % zzgl. möglicher Abschlusskosten) mit bis zu zehn Fonds/ETFs aus rund 100 Produkten.',
+    guarantee:
+      'Kein separates Garantieprodukt angekündigt.',
+    importantLimitation:
+      'Je nach Tarifvariante (insbesondere Comfort und Select) können Transaktions- und Abschlusskosten hinzukommen; endgültige Produktinformationsblätter vor Vertragsabschluss prüfen.',
+    informationStatusText:
+      'Veröffentlichte Kostenbandbreiten · Vorläufige Tarifangaben',
+    informationDate: 'November 2026',
+    hasStandardProduct: true,
+    hasFreeChoice: true,
+    hasGuarantee: false,
+    hasPublishedCosts: true,
+    hasMissingFinalPricing: false,
+    sources: [
+      {
+        label: 'Offizielle Anbieterseite: DWS VorsorgeDepot',
+        url: 'https://www.dws.de/informieren/altersvorsorge/das-neue-geplante-altersvorsorgedepot/',
+        isOfficial: true,
+      },
+      {
+        label: 'Ergänzende Kosteneinordnung: Anbieter-Monitor DWS',
+        url: 'https://altersvorsorgedepot-anbieter-vergleich.de/anbieter-monitor/dws/',
+        isOfficial: false,
+      },
+    ],
+  },
+  {
+    id: 'fidelity',
+    providerName: 'Fidelity International / FFB',
+    accessNote: 'Fondsdepotbank / Direkt- und Partnerzugang',
+    simplestConfirmedEntry:
+      'Bestätigtes Standarddepot mit globalem Aktien-ETF und Euro-Anleihen-ETF; Aktienquote anfangs bis zu 100 %, Risikoreduzierung ab 10 Jahren vor Rentenbeginn auf maximal 30 % zum Auszahlungsstart; 1 € pro Monat plus ca. 0,35 % jährliche Produktkosten.',
+    freeChoice:
+      'Vollständige Konditionen für ein freies Altersvorsorgedepot sind noch nicht abschließend bestätigt.',
+    guarantee:
+      'Kein Garantieprodukt angekündigt.',
+    importantLimitation:
+      'Die feste Gebühr von 1 € pro Monat (12 € p. a.) fällt bei kleinem Depotwert prozentual stärker ins Gewicht; Konditionen der freien Auswahl sind noch nicht vollständig veröffentlicht.',
+    informationStatusText:
+      'Standardmodell bestätigt · Freie Auswahl noch nicht vollständig veröffentlicht',
+    informationDate: 'November 2026',
+    hasStandardProduct: true,
+    hasFreeChoice: false,
+    hasGuarantee: false,
+    hasPublishedCosts: true,
+    hasMissingFinalPricing: true,
+    sources: [
+      {
+        label: 'Offizielle Anbieterseite: Fidelity Vorsorgedepot',
+        url: 'https://www.fidelity.de/produkte-services/anlageloesungen/fidelity-vorsorgedepot/',
+        isOfficial: true,
+      },
+      {
+        label: 'Offizielle Pressemitteilung: Fidelity International zum Altersvorsorgedepot',
+        url: 'https://partner.fidelity.de/artikel/pressemitteilungen/2026-05-08-fidelity-international-launcht-altersvorsorgedepot-1778245491569',
+        isOfficial: true,
+      },
+    ],
+  },
+  {
+    id: 'ing',
+    providerName: 'ING',
+    accessNote: 'Direktbank',
+    simplestConfirmedEntry:
+      'ING Relax: Zwei vordefinierte ETFs; keine eigenen ING-Gebühren; Produktkosten ca. 0,20 % p. a. zuzüglich Transaktionskosten.',
+    freeChoice:
+      'ING Aktiv: Selbstgesteuerte Auswahl aus mehr als 1.000 ETFs und Fonds; keine eigene ING-Depot-, Sparplan-, Order- oder Wechselgebühr; Produktkosten ab ca. 0,03 % p. a. zuzüglich Transaktionskosten.',
+    guarantee:
+      'Kein Garantieprodukt angekündigt.',
+    importantLimitation:
+      '„Ab 0,03 % p. a.“ ist der Einstiegswert einzelner günstiger ETFs und keine garantierte Gesamtkostenquote für jedes Portfolio; Transaktionskosten und teurere Fonds erhöhen die Gesamtkosten.',
+    informationStatusText:
+      'Veröffentlichte Konditionen · Endgültige Zertifizierungsunterlagen folgen',
+    informationDate: 'November 2026',
+    hasStandardProduct: true,
+    hasFreeChoice: true,
+    hasGuarantee: false,
+    hasPublishedCosts: true,
+    hasMissingFinalPricing: false,
+    sources: [
+      {
+        label: 'Offizielle Anbieterseite: ING Altersvorsorge-Depot',
+        url: 'https://www.ing.de/sparen-anlegen/altersvorsorge-depot/',
+        isOfficial: true,
+      },
+      {
+        label: 'Ergänzende Einordnung: Anbieterprofil ING',
+        url: 'https://neues-altersvorsorgedepot.de/anbieter/ing',
+        isOfficial: false,
+      },
+    ],
+  },
+  {
+    id: 'quirion',
+    providerName: 'Quirion / Quirin Privatbank',
+    accessNote: 'Digitaler Vermögensverwalter / Quirin Privatbank',
+    simplestConfirmedEntry:
+      'Standarddepot auf Basis von Vanguard FTSE Global All-Cap und Vanguard Global Aggregate Bond EUR Hedged (laufende ETF-TER ca. 0,07 % und 0,08 %); 0 € Depotgebühr zum Start und Erstattung der ETF-Kosten mindestens im ersten Jahr.',
+    freeChoice:
+      'Keine separate freie Einzelauswahl außerhalb des Standardkonzepts bestätigt.',
+    guarantee:
+      'Kein Garantieprodukt angekündigt.',
+    importantLimitation:
+      'Die 0-€-Depotgebühr und die ETF-Kostenerstattung gelten laut Ankündigung mindestens für das erste Jahr; die dauerhafte Preisgestaltung für spätere Jahre ist noch nicht abschließend veröffentlicht.',
+    informationStatusText:
+      'Startaktion bestätigt · Dauerhafte Folgekosten noch nicht endgültig veröffentlicht',
+    informationDate: 'November 2026',
+    hasStandardProduct: true,
+    hasFreeChoice: false,
+    hasGuarantee: false,
+    hasPublishedCosts: true,
+    hasMissingFinalPricing: true,
+    sources: [
+      {
+        label: 'Offizielle Anbieterseite: Quirion Vorsorgen',
+        url: 'https://www.quirion.de/vorsorgen',
+        isOfficial: true,
+      },
+      {
+        label: 'Offizieller Beitrag: Quirion Standard für die Altersvorsorge',
+        url: 'https://www.quirion.de/post/unser-neuer-standard-fuer-die-altersvorsorge',
+        isOfficial: true,
+      },
+      {
+        label: 'Ergänzende Einordnung: Anbieterprofil Quirion',
+        url: 'https://neues-altersvorsorgedepot.de/anbieter/quirion',
+        isOfficial: false,
+      },
+    ],
+  },
+  {
+    id: 'ruv',
+    providerName: 'R+V',
+    accessNote: 'Versicherungsanbieter der Genossenschaftlichen FinanzGruppe',
+    simplestConfirmedEntry:
+      'Angekündigtes Standardprodukt ab 1. Januar 2027 mit vordefinierten ETFs; lebenslange Rente oder Auszahlplan je nach gewähltem Produkt.',
+    freeChoice:
+      'Freies Produkt mit aktiven und passiven Fonds bzw. ETFs angekündigt.',
+    guarantee:
+      'Produktvariante mit 80 % Garantie für eingezahlte Beiträge und staatliche Zulagen angekündigt.',
+    importantLimitation:
+      'Vollständige endgültige öffentliche Preisangaben (Produktinformationsblätter, Effektivkostenquoten und Preis- und Leistungsverzeichnis) liegen noch nicht vor.',
+    informationStatusText:
+      'Vorläufige Produktankündigung · Endgültige Preisunterlagen fehlen noch',
+    informationDate: 'November 2026',
+    hasStandardProduct: true,
+    hasFreeChoice: true,
+    hasGuarantee: true,
+    hasPublishedCosts: false,
+    hasMissingFinalPricing: true,
+    sources: [
+      {
+        label: 'Offizielle Anbieterseite: R+V Altersvorsorgedepot',
+        url: 'https://www.ruv.de/altersvorsorge/private-rentenversicherung/altersvorsorgedepot',
+        isOfficial: true,
+      },
+    ],
+  },
+  {
+    id: 'scalable',
+    providerName: 'Scalable Capital',
+    accessNote: 'Digitaler Broker & Vermögensverwalter',
+    simplestConfirmedEntry:
+      '0 € Depotgebühr sowie 0 € für Spar- und Auszahlpläne; automatische altersabhängige Aufteilung im Standardprodukt.',
+    freeChoice:
+      'Breitere Auswahl in der freien Variante; Erstattung der Produktkosten ausgewählter Scalable-, BlackRock-, DWS- und Vanguard-ETFs über den angekündigten Rentenbonus.',
+    guarantee:
+      'Kein Garantieprodukt angekündigt.',
+    importantLimitation:
+      'Einzelkäufe im FREE-Modell können 0,99 € Ordergebühr kosten; zudem gelten marktübliche Spreads, und die Liste der erstattungsfähigen ETFs sowie Sonderbedingungen können sich ändern.',
+    informationStatusText:
+      'Vorläufige Ankündigung · Endgültige Vertrags- und Preisunterlagen noch offen',
+    informationDate: 'November 2026',
+    hasStandardProduct: true,
+    hasFreeChoice: true,
+    hasGuarantee: false,
+    hasPublishedCosts: true,
+    hasMissingFinalPricing: true,
+    sources: [
+      {
+        label: 'Offizielle Anbieterseite: Scalable Capital Altersvorsorgedepot',
+        url: 'https://de.scalable.capital/altersvorsorgedepot',
+        isOfficial: true,
+      },
+      {
+        label: 'Offizielle Mitteilung: Scalable Capital Newsroom',
+        url: 'https://de.scalable.capital/newsroom/altersvorsorgedepot',
+        isOfficial: true,
+      },
+    ],
+  },
+  {
+    id: 'smartbroker',
+    providerName: 'SMARTBROKER+',
+    accessNote: 'Online-Broker',
+    simplestConfirmedEntry:
+      '0 € Depotgebühr und 0 € Sparpläne (exklusive marktüblicher Spreads und möglicher Zuwendungen); 100 % TER-Erstattung im Standardmodell für mindestens die ersten drei Jahre bis 25.000 € Anlagevolumen.',
+    freeChoice:
+      'Freie Variante angekündigt; gebührenfreie Einzelkäufe über Gettex erfordern in der Regel mindestens 500 € Ordervolumen (darunter kann 1 € Gebühr anfallen).',
+    guarantee:
+      'Kein Garantieprodukt angekündigt.',
+    importantLimitation:
+      'Die TER-Erstattung ist zeitlich (mindestens 3 Jahre) und auf 25.000 € Volumen begrenzt; eine spätere Erstattung kann von weiteren Bedingungen abhängen; Börsenspreads fallen weiterhin an.',
+    informationStatusText:
+      'Befristete Startaktion angekündigt · Dauerhafte Folgekonditionen noch offen',
+    informationDate: 'November 2026',
+    hasStandardProduct: true,
+    hasFreeChoice: true,
+    hasGuarantee: false,
+    hasPublishedCosts: true,
+    hasMissingFinalPricing: true,
+    sources: [
+      {
+        label: 'Offizielle Anbieterseite: SMARTBROKER+ Altersvorsorgedepot',
+        url: 'https://www.smartbrokerplus.de/de-de/altersvorsorgedepot/',
+        isOfficial: true,
+      },
+      {
+        label: 'Ergänzender Bericht: WirtschaftsWoche zu SMARTBROKER+',
+        url: 'https://www.wiwo.de/vergleich/altersvorsorgedepot-smartbrokerplus/',
+        isOfficial: false,
+      },
+    ],
+  },
+  {
+    id: 'traderepublic',
+    providerName: 'Trade Republic',
+    accessNote: 'Digitaler Broker / Vollbank',
+    simplestConfirmedEntry:
+      '0 € Depotgebühr und 0 € Sparpläne; Standarddepot nach angekündigter Struktur kostenfrei, endgültige ETF-Zusammensetzung noch zu bestätigen.',
+    freeChoice:
+      'Auswahl aus ETFs, Staatsanleihen und aktiv verwalteten Fonds im zulässigen Rahmen; Produktkosten ausgewählter BlackRock-, Vanguard- und DWS-ETFs können erstattet und wiederangelegt werden.',
+    guarantee:
+      'Kein bestätigtes Garantieprodukt.',
+    importantLimitation:
+      '0 € Depotgebühr bedeutet nicht 0 € für alle Produkte: Die Kostenerstattung gilt nur für ausgewählte Partner-ETFs; andere Produkte, Einzeltransaktionen oder Spreads können Kosten verursachen.',
+    informationStatusText:
+      'Vorläufige Ankündigung · Endgültige ETF-Auswahl und Preisunterlagen fehlen noch',
+    informationDate: 'November 2026',
+    hasStandardProduct: true,
+    hasFreeChoice: true,
+    hasGuarantee: false,
+    hasPublishedCosts: false,
+    hasMissingFinalPricing: true,
+    sources: [
+      {
+        label: 'Offizielle Anbieterseite: Trade Republic Altersvorsorgedepot',
+        url: 'https://traderepublic.com/de-de/altersvorsorgedepot',
+        isOfficial: true,
+      },
+      {
+        label: 'Ergänzende Übersicht: Finanzfacts zu Trade Republic',
+        url: 'https://finanzfacts.de/wiki/altersvorsorgedepot/anbieter/trade-republic/',
+        isOfficial: false,
+      },
+    ],
+  },
+  {
+    id: 'union-investment',
+    providerName: 'Union Investment',
+    accessNote: 'Vertrieb über Volksbanken und Raiffeisenbanken',
+    simplestConfirmedEntry:
+      'UniVorsorge Basis ca. 0,55 % p. a., gegebenenfalls zuzüglich Transaktionskosten.',
+    freeChoice:
+      'UniVorsorge Pro ca. 1,0 % p. a.',
+    guarantee:
+      'Geplantes Produkt mit 100 % Beitragsgarantie angekündigt.',
+    importantLimitation:
+      'Der endgültige Preis für das Garantieprodukt sowie die abschließenden Produktinformationsblätter und Transaktionskosten sind öffentlich noch nicht vollständig bestätigt.',
+    informationStatusText:
+      'Richtwerte für Basis/Pro bekannt · Endgültiger Preis für Garantieprodukt fehlt noch',
+    informationDate: 'November 2026',
+    hasStandardProduct: true,
+    hasFreeChoice: true,
+    hasGuarantee: true,
+    hasPublishedCosts: true,
+    hasMissingFinalPricing: true,
+    sources: [
+      {
+        label: 'Offizielle Anbieterseite: Union Investment Altersvorsorgedepot',
+        url: 'https://www.union-investment.de/familien-und-altersvorsorge/fuers-alter-vorsorgen/altersvorsorgedepot',
+        isOfficial: true,
+      },
+      {
+        label: 'Ergänzende Kostenübersicht: Zukunftsrechner zu Union Investment',
+        url: 'https://zukunftsrechner.de/anbieter/union-investment',
+        isOfficial: false,
+      },
+    ],
+  },
+];
+
 
 export const LESSONS: LessonModule[] = [
   {
@@ -928,15 +1623,16 @@ export const LESSONS: LessonModule[] = [
         type: 'completion',
         kicker: 'Modul 02 abgeschlossen',
         title: 'Du hast den Faktor Zeit gemeistert!',
-        body: 'Du weißt jetzt, warum frühes Anfangen mit kleinen Beträgen langfristig den größten Unterschied macht.',
+        body: 'Du weißt jetzt, warum frühes Anfangen mit kleinen Beträgen langfristig den größten Unterschied macht. Im Altersvorsorgedepot können neben deinen eigenen Beiträgen auch staatliche Zulagen langfristig mitinvestiert werden. Die tatsächliche Entwicklung hängt von Rendite, Kosten und Laufzeit ab.',
         summaryPoints: [
           'Zinseszins entsteht, wenn Erträge angelegt bleiben und selbst neue Erträge erwirtschaften.',
           'Zeit ist der wichtigste Hebel: Die Kurve startet flach und wird nach 10–25 Jahren steil.',
+          'Im Altersvorsorgedepot können neben deinen eigenen Beiträgen auch staatliche Zulagen langfristig mitinvestiert werden. Die tatsächliche Entwicklung hängt von Rendite, Kosten und Laufzeit ab.',
           'Rechner zeigen geglättete Modellwerte vor Steuern, Kosten und Kursschwankungen.',
         ],
         depotBridge: {
-          label: 'Im Zinseszins-Rechner testen',
-          description: 'Probiere deine eigene Wunschrate und Laufzeit im vereinfachten Rechner aus.',
+          label: 'Im Zinseszins- & Vorsorgedepot-Rechner testen',
+          description: 'Probiere deine eigene Wunschrate sowie den Altersvorsorgedepot-Modus mit Zulagen und Kosten im Rechner aus.',
           to: '/rechner',
         },
       },
@@ -950,9 +1646,10 @@ export const LESSONS: LessonModule[] = [
         ],
       },
       {
-        heading: '2. Eigene Einzahlungen vs. Wertzuwachs',
+        heading: '2. Eigene Einzahlungen, Zulagen & Wertzuwachs',
         paragraphs: [
           'Unterscheide immer deine eigenen Einzahlungen vom geschätzten Ertrag. An der Börse verläuft Wachstum wellenförmig – ein Rechner nutzt einen geglätteten Durchschnittswert.',
+          'Im Altersvorsorgedepot können neben deinen eigenen Beiträgen auch staatliche Zulagen langfristig mitinvestiert werden. Die tatsächliche Entwicklung hängt von Rendite, Kosten und Laufzeit ab.',
         ],
       },
     ],
@@ -967,6 +1664,7 @@ export const LESSONS: LessonModule[] = [
     merkeSummary: [
       'Zinseszins entsteht, wenn erwirtschaftete Zinsen oder Erträge direkt weiter angelegt bleiben.',
       'Zeit ist wichtiger als die Höhe der ersten Sparrate.',
+      'Im Altersvorsorgedepot können neben deinen eigenen Beiträgen auch staatliche Zulagen langfristig mitinvestiert werden. Die tatsächliche Entwicklung hängt von Rendite, Kosten und Laufzeit ab.',
       'Rechenmodelle zeigen glatte Durchschnittskurven – an der Börse schwanken reale Kurse.',
     ],
     quiz: [
@@ -1077,6 +1775,13 @@ export const LESSONS: LessonModule[] = [
         title: 'Alle 7 Anlageklassen prüfen',
         body: 'Tippe auf die Anlageklassen, um Risikostufe (1 bis 5), typische Wertschwankung und Verfügbarkeit zu vergleichen:',
         widget: 'asset-inspector',
+        moreInfo: {
+          title: 'Anlageklassen im geförderten Altersvorsorgedepot',
+          points: [
+            'Nicht jede Anlageklasse ist automatisch in einem geförderten Altersvorsorgedepot zulässig. Entscheidend sind die gesetzlichen Vorgaben, die Zertifizierung und die Produktauswahl des Anbieters.',
+            'Spekulative Krypto-Assets oder physisches Gold im eigenen Tresor gehören beispielsweise nicht zu den typischen zertifizierten Standardbausteinen.',
+          ],
+        },
       },
       {
         id: 'anlageklassen-4-check-etf',
@@ -1100,7 +1805,7 @@ export const LESSONS: LessonModule[] = [
         type: 'explanation',
         kicker: 'Konzept 3 · Gold, Immobilien & Krypto',
         title: 'Warum nicht alles glänzt',
-        body: 'Immobilien binden viel Geld und sind unflexibel. Gold zahlt weder Zinsen noch Dividenden. Und Kryptowährungen wie Bitcoin schwanken extrem (oft −50 % bis −90 %) und sind reine Spekulation.',
+        body: 'Immobilien binden viel Geld und sind unflexibel. Gold zahlt weder Zinsen noch Dividenden. Und Kryptowährungen wie Bitcoin schwanken extrem (oft −50 % bis −90 %) und sind reine Spekulation. Nicht jede Anlageklasse ist automatisch in einem geförderten Altersvorsorgedepot zulässig. Entscheidend sind die gesetzlichen Vorgaben, die Zertifizierung und die Produktauswahl des Anbieters.',
         highlightPoint: 'Liquidität heißt: Wie schnell kommst du ohne hohe Abschläge wieder an dein Geld?',
         moreInfo: {
           title: 'Detaillierte Einordnung für 16- bis 20-Jährige',
@@ -1108,6 +1813,7 @@ export const LESSONS: LessonModule[] = [
             'Immobilien: Beim Direktkauf fallen oft 8–12 % Kaufnebenkosten (Steuer, Notar, Makler) an, und ein Verkauf dauert Monate.',
             'Gold: Kein laufender Zinseszins-Effekt, da Gold keine Zinsen oder Dividenden ausschüttet.',
             'Krypto: Keine Einlagensicherung. Verlust des Zugangs-Schlüssels (Seed Phrase) bedeutet Totalverlust.',
+            'Nicht jede Anlageklasse ist automatisch in einem geförderten Altersvorsorgedepot zulässig. Entscheidend sind die gesetzlichen Vorgaben, die Zertifizierung und die Produktauswahl des Anbieters.',
           ],
         },
       },
@@ -1161,6 +1867,7 @@ export const LESSONS: LessonModule[] = [
           'Tagesgeld sichert deine kurzfristige Liquidität ohne Kursschwankung.',
           'Breit gestreute ETFs verteilen das Marktrisiko auf hunderte Firmen weltweit.',
           'Einzelaktien und Krypto-Assets haben hohe bis sehr hohe Verlustrisiken.',
+          'Nicht jede Anlageklasse ist automatisch in einem geförderten Altersvorsorgedepot zulässig. Entscheidend sind die gesetzlichen Vorgaben, die Zertifizierung und die Produktauswahl des Anbieters.',
         ],
         depotBridge: {
           label: 'ETF und Einzelaktie vergleichen',
@@ -1178,10 +1885,11 @@ export const LESSONS: LessonModule[] = [
         ],
       },
       {
-        heading: '2. Wachstumsbausteine & Sachwerte',
+        heading: '2. Wachstumsbausteine, Sachwerte & Altersvorsorgedepot',
         paragraphs: [
           'Einzelaktien beteiligen dich an einer einzelnen Firma (Klumpenrisiko). Ein Welt-ETF bündelt hunderte Unternehmen in einem Baustein.',
           'Immobilien sind unflexibel, Gold zahlt keine Zinsen, und Kryptowährungen sind hochspekulativ.',
+          'Nicht jede Anlageklasse ist automatisch in einem geförderten Altersvorsorgedepot zulässig. Entscheidend sind die gesetzlichen Vorgaben, die Zertifizierung und die Produktauswahl des Anbieters.',
         ],
       },
     ],
@@ -1197,6 +1905,7 @@ export const LESSONS: LessonModule[] = [
       'Prüfe bei jeder Anlageklasse Risiko, Wertschwankung, Verfügbarkeit (Liquidität) und Kosten.',
       'Einzelaktien und Krypto-Assets bergen hohe bis sehr hohe Verlustrisiken.',
       'Breit gestreute ETFs verteilen das Risiko auf hunderte Unternehmen, schwanken aber ebenfalls mit dem Gesamtmarkt.',
+      'Nicht jede Anlageklasse ist automatisch in einem geförderten Altersvorsorgedepot zulässig. Entscheidend sind die gesetzlichen Vorgaben, die Zertifizierung und die Produktauswahl des Anbieters.',
     ],
     quiz: [
       {
@@ -1250,9 +1959,9 @@ export const LESSONS: LessonModule[] = [
     order: 4,
     isCoreTopic: true,
     categoryLabel: 'Modul 04 · Alltag & Sparrate',
-    title: 'Sparen mit kleinen Beträgen & Kindergeld',
+    title: 'Sparen mit kleinen Beträgen',
     shortTitle: 'Kleine Beträge',
-    subtitle: 'Warum 15 € oder 25 € im Monat ein starker Start sind – und wie du Töpfe trennst.',
+    subtitle: 'Wie du kleine Monatsbeträge zwischen Alltag, Reserve und Zukunft aufteilst.',
     oneLineDescription: 'Mit 15–25 € im Monat starten und Alltag, Reserve & Sparplan trennen.',
     readingMinutes: 4,
     hook: 'Lohnt sich ein Sparplan überhaupt schon mit 15 € oder 25 € im Monat?',
@@ -1265,7 +1974,7 @@ export const LESSONS: LessonModule[] = [
         kicker: 'Modul 04 · Kleine Beträge',
         title: 'Gewohnheit schlägt große Startsummen',
         hook: 'Schon 15 € oder 25 € monatlich bauen über die Jahre ein echtes Polster auf – ohne dass dein Alltag zu kurz kommt.',
-        body: 'Hier lernst du die 3-Töpfe-Trennung kennen und siehst, warum niemals das gesamte freie Geld in einen Börsen-Sparplan fließen darf.',
+        body: 'Hier lernst du die 3-Töpfe-Trennung kennen, unterscheidest Kindergeld von der Kinderzulage und siehst, warum niemals das gesamte freie Geld in einen Börsen-Sparplan fließen darf.',
         visual: 'three-pots',
         ctaLabel: 'Lektion starten',
       },
@@ -1275,13 +1984,14 @@ export const LESSONS: LessonModule[] = [
         kicker: 'Konzept 1 · Saubere Trennung',
         title: 'Das 3-Töpfe-Prinzip für dein Geld',
         body: 'Damit du nie in Geldnot gerätst, trennst du dein Geld klar: 1. Girokonto für laufende Alltagskosten, 2. Tagesgeld für Notgroschen & kurzfristige Wünsche, 3. Sparplan nur für den kleinen Betrag, den du jahrelang nicht brauchst.',
-        highlightPoint: 'Wichtig: Kindergeld (Richtwert 255 € / Monat, Stand 2025/2026) ist primär für deinen Lebensunterhalt und deine Ausbildung da – niemals komplett investieren!',
+        highlightPoint: 'Wichtig: Kindergeld unterstützt den laufenden Lebensunterhalt einer Familie (Rechts- und Informationsstand: November 2026). Die Kinderzulage gehört dagegen zur Förderung eines berechtigten Altersvorsorgevertrags.',
         visual: 'three-pots',
         moreInfo: {
-          title: 'Depot-Eröffnung unter 18 Jahren',
+          title: 'Kindergeld vs. Kinderzulage & Junior-Depot',
           points: [
-            'Jugendliche unter 18 Jahren können ein Wertpapierdepot nicht allein eröffnen – dafür ist die Zustimmung der Eltern (Junior-Depot) erforderlich.',
-            'Ein guter Sparplan lässt sich jederzeit kostenlos pausieren, senken oder erhöhen, falls sich dein Einkommen ändert.',
+            'Kindergeld dient laufenden Kosten für Wohnen, Ernährung, Schule oder Ausbildung.',
+            'Die Kinderzulage im Altersvorsorgedepot ist dagegen eine staatliche Zulage, die direkt in einen geförderten Altersvorsorgevertrag fließt.',
+            'Jugendliche unter 18 Jahren können ein Wertpapierdepot nur mit Zustimmung der Eltern eröffnen.',
           ],
         },
       },
@@ -1307,7 +2017,7 @@ export const LESSONS: LessonModule[] = [
         type: 'interactive',
         kicker: 'Konzept 2 · Kleinbetrags-Rechner',
         title: 'Was wird aus 15 € bis 50 € im Monat?',
-        body: 'Teste selbst, wie sich ein kleiner Monatsbetrag (z. B. 10 % vom Kindergeld = ca. 25 €) über 10 bis 25 Jahre entwickeln kann:',
+        body: 'Teste selbst, wie sich ein kleiner Monatsbetrag (z. B. 15 € oder 25 €) über viele Jahre entwickeln kann:',
         widget: 'small-amounts-slider',
       },
       {
@@ -1346,19 +2056,19 @@ export const LESSONS: LessonModule[] = [
       {
         id: 'kindergeld-7-check2',
         type: 'question',
-        kicker: 'Kurz-Check · Zeitpunkt',
-        title: 'Wann läuft der Sparplan am besten?',
-        question: 'Wann im Monat ist der sinnvollste Zeitpunkt für deinen Dauerauftrag oder Sparplan?',
+        kicker: 'Kurz-Check · Begriffe trennen',
+        title: 'Kindergeld vs. Kinderzulage',
+        question: 'Worin liegt der Unterschied zwischen Kindergeld und der Kinderzulage im Altersvorsorgedepot?',
         options: [
-          'Direkt am Monatsanfang kurz nach Geldeingang.',
-          'Nur einmal im Jahr an Silvester, falls Geld übrig ist.',
-          'Immer erst am letzten Tag des Monats.',
+          'Kindergeld unterstützt den laufenden Lebensunterhalt einer Familie; die Kinderzulage fließt als staatliche Förderung in einen berechtigten Altersvorsorgevertrag.',
+          'Beides ist exakt dasselbe und wird jeden Monat bar ausgezahlt.',
+          'Die Kinderzulage ersetzt das Kindergeld ab dem 16. Geburtstag vollständig.',
         ],
         correctIndex: 0,
         explanationCorrect:
-          'Genau. Am Monatsanfang („Pay yourself first“) wird das Sparen zur festen Gewohnheit.',
+          'Genau richtig. Kindergeld ist für den laufenden Lebensunterhalt gedacht, während die Kinderzulage zur Förderung eines zertifizierten Altersvorsorgevertrags gehört.',
         explanationWrong:
-          'Am Monatsende ist das Geld oft schon nebenbei ausgegeben. Ein Auftrag direkt nach Geldeingang funktioniert viel zuverlässiger.',
+          'Wichtig zu trennen: Kindergeld unterstützt den Alltag einer Familie. Die Kinderzulage ist dagegen eine Zulage innerhalb eines geförderten Altersvorsorgevertrags.',
       },
       {
         id: 'kindergeld-8-completion',
@@ -1368,6 +2078,7 @@ export const LESSONS: LessonModule[] = [
         body: 'Du weißt jetzt, wie du schon mit 15 € oder 25 € monatlich sinnvoll startest, ohne deinen Alltag einzuschränken.',
         summaryPoints: [
           'Alltagskosten und Notgroschen kommen immer zuerst.',
+          'Kindergeld unterstützt den laufenden Lebensunterhalt; die Kinderzulage gehört zur Förderung eines Altersvorsorgevertrags.',
           'Schon ein kleiner Teilbetrag (z. B. 25 € / Monat) hat über viele Jahre große Wirkung.',
           'Automatische Abbuchung am Monatsanfang schafft mühelose Gewohnheit.',
         ],
@@ -1382,7 +2093,7 @@ export const LESSONS: LessonModule[] = [
       {
         heading: '1. Erst das Monatsbudget prüfen, dann sparen',
         paragraphs: [
-          'Investiere niemals dein gesamtes verfügbares Geld und niemals das komplette Kindergeld (Richtwert: 255 € pro Monat, Stand 2025/2026).',
+          'Investiere niemals dein gesamtes verfügbares Geld. Kindergeld unterstützt den laufenden Lebensunterhalt einer Familie (Rechts- und Informationsstand: November 2026), während die Kinderzulage zur Förderung eines berechtigten Altersvorsorgevertrags gehört.',
           'Trenne dein Geld in Alltagskonto (Girokonto), Rücklage (Tagesgeld) und langfristigen Zukunfts-Sparplan.',
         ],
       },
@@ -1403,7 +2114,7 @@ export const LESSONS: LessonModule[] = [
     interactiveType: 'small-amounts',
     merkeSummary: [
       'Erst laufende Lebenshaltungskosten und Notgroschen sichern – erst danach langfristig investieren.',
-      'Kindergeld dient primär dem Alltag; schon ein kleiner Teilbetrag (z. B. 25 €) wirkt langfristig stark.',
+      'Kindergeld unterstützt den laufenden Lebensunterhalt einer Familie; die Kinderzulage gehört zur Förderung eines berechtigten Altersvorsorgevertrags.',
       'Ein guter Sparplan lässt sich jederzeit reduzieren oder pausieren.',
     ],
     quiz: [
@@ -1423,17 +2134,17 @@ export const LESSONS: LessonModule[] = [
       },
       {
         id: 'kindergeld-q2',
-        question: 'Wann ist im Monat der beste Zeitpunkt, um einen festen Sparbetrag zur Seite zu legen?',
+        question: 'Worin unterscheiden sich Kindergeld und Kinderzulage?',
         options: [
-          'Gleich am Monatsanfang direkt nach Geldeingang per Dauerauftrag oder Sparplan.',
-          'Nur einmal im Jahr an Silvester, falls zufällig etwas übrig geblieben ist.',
-          'Immer erst am letzten Tag des Monats um 23 Uhr.',
+          'Kindergeld unterstützt den laufenden Lebensunterhalt einer Familie; die Kinderzulage gehört zur staatlichen Förderung eines berechtigten Altersvorsorgevertrags.',
+          'Beides sind identische Barüberweisungen aufs Girokonto.',
+          'Die Kinderzulage gibt es nur für Einzelaktien.',
         ],
         correctIndex: 0,
         explanationCorrect:
-          'Genau! Nach dem Prinzip „Bezahle dich selbst zuerst“ geht der Sparbetrag direkt am Monatsanfang weg.',
+          'Genau! Kindergeld ist für den laufenden Familienalltag da, die Kinderzulage fließt in einen geförderten Altersvorsorgevertrag.',
         explanationWrong:
-          'Ein automatischer Auftrag am Monatsanfang schafft verlässliche Gewohnheit.',
+          'Kindergeld dient dem laufenden Lebensunterhalt, während die Kinderzulage zu einem geförderten Altersvorsorgevertrag gehört.',
       },
     ],
     nextRoute: '/altersvorsorgedepot',
@@ -1443,221 +2154,328 @@ export const LESSONS: LessonModule[] = [
     route: '/altersvorsorgedepot',
     order: 5,
     isCoreTopic: true,
-    categoryLabel: 'Modul 05 · Weitblick',
-    title: 'Altersvorsorge & langer Horizont',
-    shortTitle: 'Altersvorsorge',
-    subtitle: 'Gesetzliche vs. private Vorsorge, Flexibilität und geplante Gesetze.',
-    oneLineDescription: 'Gesetzliche Rente, private Vorsorge und warum Flexibilität zählt.',
-    readingMinutes: 5,
-    hook: 'Warum lohnt sich ein kurzer Blick auf die Rente schon mit 18?',
+    categoryLabel: 'Modul 05 · Altersvorsorge ab 2027',
+    title: 'Das neue Altersvorsorgedepot',
+    shortTitle: 'Vorsorgedepot',
+    subtitle:
+      'Eigener Beitrag, staatliche Zulage, mögliche Wertentwicklung, Kosten und Steuern.',
+    oneLineDescription:
+      'Wie das neue Altersvorsorgedepot funktioniert und aus welchen Teilen ein möglicher Endwert besteht.',
+    readingMinutes: 7,
+    hook: 'Du sparst – der Staat legt etwas dazu: Wie funktioniert das Altersvorsorgedepot ab 2027?',
     intro:
-      'Mit 16 bis 20 Jahren wirkt die Rente weit weg. Doch bei 45+ Jahren Zeithorizont arbeitet die Zeit so stark für dich wie nie wieder – wenn du teure, unflexible Verträge vermeidest.',
+      'Die gesetzliche Grundlage wurde 2026 beschlossen. Zertifizierte Produkte sollen ab dem 1. Januar 2027 angeboten werden. Konkrete Anbieterbedingungen können sich bis zur endgültigen Zertifizierung und Veröffentlichung der Produktunterlagen noch ändern.',
     steps: [
       {
         id: 'altersvorsorge-1-intro',
         type: 'intro',
-        kicker: 'Modul 05 · Altersvorsorge',
-        title: 'Weitblick ohne Knebelvertrag',
-        hook: '45 Jahre Zeit sind dein größter Vorteil – aber nur, wenn du jung genug Geld für Ausbildung, Umzug und Leben flexibel hältst.',
-        body: 'Lerne in wenigen Schritten, wie die gesetzliche Rente funktioniert, worin sich flexibles Sparen von gesperrten Verträgen unterscheidet und was beim „Altersvorsorgedepot“ wirklich gilt.',
-        visual: 'time-horizon',
+        kicker: 'Modul 05 · Altersvorsorge ab 2027',
+        title: 'Du sparst – der Staat legt etwas dazu',
+        hook: 'Ab 2027 können zertifizierte Altersvorsorgedepots angeboten werden. Du zahlst einen eigenen Beitrag ein, der Staat kann eine Zulage ergänzen und das Geld kann langfristig investiert werden.',
+        body: 'Wichtig zur Einordnung: Der Staat zahlt damit nicht deine gesamte spätere Rente und garantiert auch keinen Börsengewinn. Das Altersvorsorgedepot ist ein zusätzlicher privater Vorsorgebaustein (Rechts- und Informationsstand: November 2026).',
+        visual: 'allowance-stack',
         ctaLabel: 'Lektion starten',
       },
       {
-        id: 'altersvorsorge-2-umlage',
+        id: 'altersvorsorge-2-three-pillars',
         type: 'explanation',
-        kicker: 'Konzept 1 · Das Grundsystem',
-        title: 'Gesetzliche Rente: Das Umlageverfahren',
-        body: 'In Deutschland werden deine späteren Rentenbeiträge nicht auf einem eigenen Konto angespart, sondern direkt an die heutigen Rentner ausgezahlt (Umlageverfahren). Weil es künftig mehr Rentner im Verhältnis zu jüngeren Beitragszahlern gibt, entsteht eine Versorgungslücke.',
-        highlightPoint: 'Die gesetzliche Rente bleibt die wichtige Basis – reicht allein aber später meist nicht für den gewohnten Lebensstandard.',
+        kicker: 'Schritt 2 · Drei Säulen & Zweck',
+        title: 'Wo das Altersvorsorgedepot eingeordnet wird',
+        body: 'In Deutschland besteht die Altersvorsorge aus drei Säulen: 1. der gesetzlichen Altersvorsorge (Umlageverfahren über Pflichtbeiträge), 2. der betrieblichen Altersvorsorge (über den Arbeitgeber) und 3. der privaten Altersvorsorge mit eigenem Kapitalaufbau.',
+        highlightPoint:
+          'Ein privates Altersvorsorgedepot kann die gesetzliche und betriebliche Altersvorsorge ergänzen.',
         visual: 'pension-balance',
         moreInfo: {
-          title: 'Die 3 Säulen der Altersvorsorge',
+          title: 'Rechts- und Informationsstand: November 2026',
           points: [
-            '1. Säule: Gesetzliche Rentenversicherung (Pflichtbeiträge aus dem Bruttolohn).',
-            '2. Säule: Betriebliche Altersvorsorge (über den Arbeitgeber).',
-            '3. Säule: Private Vorsorge (eigenes Depot oder geförderte Verträge).',
+            'Die gesetzliche Grundlage wurde 2026 beschlossen. Zertifizierte Produkte sollen ab dem 1. Januar 2027 angeboten werden. Konkrete Anbieterbedingungen können sich bis zur endgültigen Zertifizierung und Veröffentlichung der Produktunterlagen noch ändern.',
+            'Ob und in welcher Höhe eine zusätzliche private Vorsorge zu dir passt, hängt von deiner Lebenssituation, deinem Budget und deiner bestehenden Absicherung ab.',
           ],
-          sourceNote: 'Quelle: Deutsche Rentenversicherung (ihre-vorsorge.de)',
+          sourceNote: 'Rechts- und Informationsstand: November 2026',
         },
       },
       {
-        id: 'altersvorsorge-3-check1',
+        id: 'altersvorsorge-3-grundzulage-interactive',
+        type: 'interactive',
+        kicker: 'Schritt 3 · Grundzulage ausprobieren',
+        title: 'Wie dein Eigenbeitrag und die Grundzulage zusammenhängen',
+        body: 'Für die ersten 360 € Jahresbeitrag gibt es in diesem Modell 50 Cent Grundzulage je Euro, für den Teil darüber bis 1.800 € jährlich 25 Cent je Euro (maximal 540 € Grundzulage pro Jahr). Beiträge über 1.800 € pro Jahr lösen keine zusätzliche Grundzulage aus.',
+        widget: 'allowance-slider',
+        moreInfo: {
+          title: 'Zwei Förderstufen einfach nachgerechnet',
+          points: [
+            'Stufe 1 (bis 360 € Eigenbeitrag im Jahr, also bis 30 € / Monat): Grundzulage = Jahresbeitrag × 0,50 (maximal 180 €).',
+            'Stufe 2 (für den Teil über 360 € bis 1.800 € im Jahr, also bis 150 € / Monat): zusätzlich 0,25 € je Euro (maximal weitere 360 €).',
+            'Höchstbetrag der Grundzulage in diesem Modell: 180 € + 360 € = 540 € pro Jahr.',
+          ],
+          sourceNote: 'Rechts- und Informationsstand: November 2026',
+        },
+      },
+      {
+        id: 'altersvorsorge-4-check-grundzulage',
         type: 'question',
-        kicker: 'Verständnis-Check · Rentensystem',
-        title: 'Umlage vs. eigenes Kapital',
-        question: 'Was ist der Kernunterschied zwischen der gesetzlichen Rente und privater Vorsorge?',
+        kicker: 'Schritt 4 · Verständnis-Check',
+        title: 'Grundzulage bei 30 € im Monat',
+        question:
+          'Du zahlst 30 € pro Monat ein, also 360 € im Jahr. Wie hoch ist die Grundzulage in diesem Modell?',
+        options: ['30 €', '180 €', '360 €', '540 €'],
+        correctIndex: 1,
+        explanationCorrect:
+          'Für die ersten 360 € Eigenbeitrag werden 50 Cent Grundzulage je eingezahltem Euro berücksichtigt.',
+        explanationWrong:
+          'Rechne nach: Für die ersten 360 € Eigenbeitrag werden 50 Cent Grundzulage je eingezahltem Euro berücksichtigt (360 € × 0,50 = 180 €).',
+      },
+      {
+        id: 'altersvorsorge-5-zusatzfoerderung',
+        type: 'explanation',
+        kicker: 'Schritt 5 · Weitere Zulagen',
+        title: 'Berufseinsteigerbonus (einmalig) und Kinderzulage (jährlich)',
+        body: 'Neben der jährlichen Grundzulage gibt es zwei besondere Förderbausteine: Wer vor dem 25. Geburtstag einen förderberechtigten Vertrag abschließt, kann einen einmaligen Berufseinsteigerbonus von 200 € erhalten. Für jedes förderberechtigte Kind gibt es zudem 1 € Kinderzulage je 1 € Eigenbeitrag – bis zu maximal 300 € pro Kind und Jahr.',
+        highlightPoint:
+          'Kindergeld unterstützt den laufenden Lebensunterhalt einer Familie. Die Kinderzulage gehört dagegen zur Förderung eines berechtigten Altersvorsorgevertrags.',
+        visual: 'allowance-stack',
+        moreInfo: {
+          title: 'Unterschied: Jährlich, einmalig und pro Kind',
+          points: [
+            'Grundzulage: jährlich wiederkehrend (abhängig vom jährlichen Eigenbeitrag, bis zu 540 € pro Jahr).',
+            'Berufseinsteigerbonus: einmalig 200 € bei Vertragsabschluss vor dem 25. Geburtstag.',
+            'Kinderzulage: jährlich pro förderberechtigtem Kind (1 € je 1 € Eigenbeitrag, maximal 300 € pro Kind und Jahr).',
+          ],
+        },
+      },
+      {
+        id: 'altersvorsorge-6-breakdown-interactive',
+        type: 'interactive',
+        kicker: 'Schritt 6 · Modellrechnung zerlegen',
+        title: 'Woraus besteht ein möglicher Endwert?',
+        body: 'Schau dir getrennt an, welcher Teil aus deinen eigenen Einzahlungen, aus staatlichen Zulagen und aus einer angenommenen Wertentwicklung stammt – und wie laufende Kosten das Ergebnis mindern:',
+        widget: 'retirement-breakdown',
+      },
+      {
+        id: 'altersvorsorge-7-check-model',
+        type: 'question',
+        kicker: 'Schritt 7 · Modell vs. Garantie',
+        title: 'Modellrechnung richtig einordnen',
+        question: 'Warum zeigt der Rechner mehrere mögliche Ergebnisse?',
         options: [
-          'Bei der gesetzlichen Rente finanzieren heutige Beitragszahler direkt die heutigen Rentner (Umlageverfahren); privat baust du eigenes Kapital auf.',
-          'Die gesetzliche Rente legt alle Beiträge in Einzelaktien an.',
-          'Private Vorsorge ist unter 30 Jahren verboten.',
+          'Rendite, Kosten und Kapitalmarktentwicklung stehen nicht im Voraus fest.',
+          'Weil die staatliche Grundzulage jeden Tag an der Börse neu ausgelost wird.',
+          'Weil der Staat in jedem Modell denselben Endwert garantiert.',
         ],
         correctIndex: 0,
         explanationCorrect:
-          'Richtig. Die gesetzliche Rente nutzt das Umlageverfahren, während du privat einen eigenen Kapitalstock aufbaust.',
+          'Genau richtig: Rendite, Kosten und Kapitalmarktentwicklung stehen nicht im Voraus fest. Während sich die Zulage nach den gesetzlichen Förderregeln richtet, schwankt die Marktentwicklung, Vertragskosten mindern den Wert und spätere Auszahlungen unterliegen der Besteuerung.',
         explanationWrong:
-          'Merke dir: Die gesetzliche Rente zahlt laufende Beiträge direkt an aktuelle Ruheständler aus (Umlageverfahren).',
+          'Wichtig zu unterscheiden: Rendite, Kosten und Kapitalmarktentwicklung stehen nicht im Voraus fest. Eine Modellrechnung ist daher niemals eine garantierte Prognose.',
+        moreInfo: {
+          title: 'Vier Einflussfaktoren sauber trennen',
+          points: [
+            '1. Staatliche Zulage: richtet sich nach den gesetzlichen Fördervoraussetzungen und deinem Eigenbeitrag.',
+            '2. Marktentwicklung: nicht garantiert; Kurse können steigen, aber auch schwanken oder fallen.',
+            '3. Vertragskosten: Depot-, Verwaltungs-, Produkt- und Transaktionskosten schmälern das Ergebnis direkt.',
+            '4. Spätere Besteuerung: der angezeigte Modellwert ist ein Wert vor Steuern in der Auszahlungsphase.',
+          ],
+        },
       },
       {
-        id: 'altersvorsorge-4-compare-flex',
+        id: 'altersvorsorge-8-three-products',
+        type: 'triple_comparison',
+        kicker: 'Schritt 8 · Drei Produktwege',
+        title: 'Standarddepot, freies Altersvorsorgedepot und Garantieprodukt',
+        body: 'Innerhalb des neuen Systems können Anbieter unterschiedliche Produktvarianten anbieten. Vergleiche die drei Grundtypen:',
+        cards: [
+          {
+            label: 'Variante 1 · Standardisiert',
+            title: 'Standarddepot',
+            badge: 'Kostendeckel max. 1 %',
+            tone: 'accent',
+            points: [
+              'Einfache, standardisierte Struktur mit begrenzter Auswahl',
+              'Meist ein chancenorientierter und ein schwankungsärmerer Baustein',
+              'Gesetzliche Begrenzung der Effektivkosten auf maximal 1 %',
+              'Automatische Risikoreduzierung vor dem Rentenbeginn je nach Produktstruktur möglich',
+            ],
+          },
+          {
+            label: 'Variante 2 · Selbstgesteuert',
+            title: 'Freies Altersvorsorgedepot',
+            badge: 'Breitere Auswahl',
+            tone: 'neutral',
+            points: [
+              'Breitere Auswahl an zulässigen Fonds und ETFs',
+              'Mehr eigene Verantwortung bei Auswahl und Gewichtung',
+              'Kosten hängen vom Anbieter und den gewählten Produkten ab',
+              'Keine identische 1-%-Kostenobergrenze für jede freie Produktkonfiguration',
+            ],
+          },
+          {
+            label: 'Variante 3 · Mit Absicherung',
+            title: 'Garantieprodukt',
+            badge: '80 % oder 100 % Garantie',
+            tone: 'warning',
+            points: [
+              'Varianten mit 80 % oder 100 % Garantie können angeboten werden',
+              'Reduziertes Verlustrisiko zum maßgeblichen Rentenbeginn',
+              'Garantien können die mögliche langfristige Rendite verringern',
+              'Preis und Bedingungen hängen vom konkreten Anbieter ab',
+            ],
+          },
+        ],
+        takeaway:
+          'Mehr Auswahl, mehr Garantie oder niedrigere Kosten sind unterschiedliche Eigenschaften. Kein Merkmal macht ein Produkt automatisch zur besten Lösung für alle.',
+      },
+      {
+        id: 'altersvorsorge-9-free-vs-promoted',
         type: 'comparison',
-        kicker: 'Konzept 2 · Zwei Wege',
-        title: 'Flexibles Depot vs. gebundener Rentenvertrag',
-        body: 'Wenn du privat vorsorgst, solltest du mit 18 Jahren besonders auf Kosten und Verfügbarkeit achten:',
+        kicker: 'Schritt 9 · Zwei Werkzeuge im Vergleich',
+        title: 'Freies Wertpapierdepot vs. gefördertes Altersvorsorgedepot',
+        body: 'Du kannst privat sowohl in einem normalen Wertpapierdepot als auch in einem zertifizierten Altersvorsorgedepot investieren:',
         leftCard: {
-          label: 'Eigenes Wertpapierdepot (z. B. ETF-Sparplan)',
-          title: 'Flexibel & günstig',
-          badge: 'Hohe Freiheit',
-          tone: 'accent',
+          label: 'Ohne staatliche Zulage',
+          title: 'Freies Wertpapierdepot',
+          badge: 'Flexibel verfügbar',
+          tone: 'neutral',
           points: [
-            'Sehr geringe laufende Kosten (ca. 0,1–0,3 % p.a.)',
-            'Sparrate jederzeit pausierbar oder anpassbar',
-            'Kapital ist bei Bedarf vor dem Rentenalter verfügbar',
+            'Grundsätzlich jederzeit flexibler verfügbar',
+            'Keine Grundzulage des Altersvorsorgedepots',
+            'Große Produktauswahl am Markt',
+            'Normale steuerliche Behandlung (laufende Besteuerung oberhalb des Sparer-Pauschbetrags)',
+            'Auch für Sparziele vor dem Ruhestand nutzbar',
           ],
         },
         rightCard: {
-          label: 'Spezieller Altersvorsorge-Vertrag',
-          title: 'Fest gebunden bis 62–67 J.',
-          badge: 'Lange Sperrfrist',
-          tone: 'warning',
+          label: 'Zertifizierter Vertrag ab 2027',
+          title: 'Gefördertes Altersvorsorgedepot',
+          badge: 'Zweckgebunden fürs Alter',
+          tone: 'accent',
           points: [
-            'Oft hohe Abschluss- und Verwaltungskosten in den ersten Jahren',
-            'Geld ist meist bis zum Renteneintritt fest eingeschlossen',
-            'Vorzeitige Kündigung oft nur mit Verlusten möglich',
+            'Staatliche Zulage bei Förderberechtigung möglich',
+            'Erträge innerhalb des Vertrags in der Ansparphase nicht laufend besteuert',
+            'Kapital ist für die Altersvorsorge gebunden (eingeschränkter Zugriff)',
+            'Spätere Auszahlungen im Alter sind grundsätzlich steuerpflichtig',
+            'Nur zertifizierte Produkte sind förderfähig',
           ],
         },
-        takeaway: 'Solange Ausbildung, Studium und Lebensplanung noch offen sind, ist Flexibilität meist wichtiger als ein starrer 45-Jahre-Vertrag.',
+        takeaway:
+          'Ein freies Depot und ein Altersvorsorgedepot erfüllen unterschiedliche Aufgaben. Entscheidend sind Ziel, Laufzeit, Kosten, Verfügbarkeit und persönliche Voraussetzungen.',
       },
       {
-        id: 'altersvorsorge-5-interactive',
-        type: 'interactive',
-        kicker: 'Konzept 3 · Zeithorizont bis 67',
-        title: 'Was ein früher Start mit kleinen Beträgen bewirkt',
-        body: 'Schiebe das Startalter zwischen 18 und 40 Jahren hin und her und beobachte den Zeitvorteil bis zum 67. Lebensjahr:',
-        widget: 'retirement-slider',
-      },
-      {
-        id: 'altersvorsorge-6-status-warning',
-        type: 'explanation',
-        kicker: 'Konzept 4 · Gesetzesstatus (Stand: 2025/2026)',
-        title: 'Geplante Reformen sind noch keine gültigen Gesetze',
-        body: 'In der Politik wurde ein staatlich gefördertes „Altersvorsorgedepot“ diskutiert, um günstiges Fondssparen fürs Alter zu fördern. Wichtig: Dieses Konzept ist bislang ein politisches Vorhaben und noch NICHT als Gesetz in Kraft.',
-        highlightPoint: 'Unterschreibe niemals Verträge, die mit noch nicht beschlossenen Gesetzen werben.',
-        visual: 'cost-warning',
-        moreInfo: {
-          title: 'Wie erkenne ich den echten Gesetzesstand?',
-          points: [
-            'Politische Vorschläge ändern sich im Gesetzgebungsverfahren häufig oder werden verschoben.',
-            'Prüfe vor jeder Vertragsentscheidung bei der Verbraucherzentrale oder dem Bundesfinanzministerium, welche Regeln tatsächlich beschlossen und aktiv sind.',
-          ],
-        },
-      },
-      {
-        id: 'altersvorsorge-7-scenario-tarek',
+        id: 'altersvorsorge-10-scenario-nora',
         type: 'scenario',
-        kicker: 'Praxis-Entscheidung · Tarek (19)',
-        title: 'Verkaufsgespräch zum Ausbildungsstart',
-        personTag: 'Tarek · 19 Jahre · 1. Ausbildungsjahr',
-        situation: 'Ein Finanzverkäufer rät Tarek zu einem 48 Jahre lang fest gesperrten Rentenvertrag mit hohen Abschlussgebühren. Tarek weiß aber noch nicht, ob er nach der Ausbildung studieren oder in eine andere Stadt ziehen möchte.',
+        kicker: 'Schritt 10 · Entscheidungs-Check',
+        title: 'Wie prüft Nora ein Angebot strukturiert?',
+        personTag: 'Nora · 19 Jahre · Ausbildung',
+        situation:
+          'Nora hat nach allen Ausgaben 70 € monatlich übrig. Ihr Notgroschen ist noch nicht vollständig aufgebaut. Sie sieht Werbung für ein Altersvorsorgedepot mit staatlicher Zulage.',
         contextFacts: [
+          { label: 'Übrig pro Monat', value: '70 €' },
+          { label: 'Notgroschen', value: 'noch im Aufbau' },
           { label: 'Alter', value: '19 Jahre' },
-          { label: 'Vertragsbindung', value: '48 Jahre gesperrt' },
         ],
-        question: 'Wie sollte Tarek reagieren?',
+        question: 'Was sollte Nora vor einer Entscheidung prüfen?',
         options: [
-          'Nicht sofort unterschreiben: Zuerst unabhängige Infos prüfen, Arbeitgeber-VL nutzen und einen flexiblen, kostengünstigen Sparplan wählen',
-          'Sofort unterschreiben, weil man sich mit 19 für 48 Jahre festlegen muss',
-          'Sein gesamtes Ausbildungsgehalt in den gesperrten Vertrag einzahlen',
+          'Budget und Notgroschen, Bindungsdauer, Effektivkosten, verfügbare Anlageprodukte, Garantien und Auszahlungsregeln.',
+          'Sofort die vollen 70 € monatlich einzahlen, nur um eine möglichst hohe Zulage zu erhalten.',
+          'Den Anbieter mit der auffälligsten Werbung auswählen, ohne das Produktinformationsblatt zu prüfen.',
+          'Davon ausgehen, dass die in der Werbung gezeigte Modellrendite fest garantiert ist.',
         ],
         correctIndex: 0,
         explanationCorrect:
-          'Richtig entschieden! Mit 19 braucht Tarek Flexibilität für Studium oder Umzug. Hohe Abschlusskosten und 48 Jahre Kündigungssperre passen nicht zu seiner Lebensphase.',
+          'Genau richtig. Nora sichert zuerst ihren Notgroschen und prüft vor jedem Vertragsabschluss systematisch Budget, Bindungsdauer, Effektivkosten, Produktauswahl, Garantien und Auszahlungsregeln.',
         explanationWrong:
-          'Vorsicht: Ein 48 Jahre gesperrter Vertrag mit hohen Abschlusskosten nimmt Tarek jede Flexibilität für Studium oder Umzug.',
+          'Vorsicht: Weder eine Werbeanzeige noch eine hohe Zulage ersetzen den Blick auf Notgroschen, Bindungsdauer, Effektivkosten und Auszahlungsregeln.',
       },
       {
-        id: 'altersvorsorge-8-completion',
+        id: 'altersvorsorge-11-completion',
         type: 'completion',
         kicker: 'Modul 05 abgeschlossen',
-        title: 'Weitblick mit klarem Kopf!',
-        body: 'Du verstehst jetzt das Rentensystem und weißt, warum niedrige Kosten und Flexibilität in jungen Jahren entscheidend sind.',
+        title: 'Du kannst Förderung und Rendite jetzt trennen.',
+        body: 'Du weißt jetzt, wie das neue Altersvorsorgedepot aufgebaut ist, welche Teile eines Endwerts planbar sind und welche Annahmen vor einem Abschluss geprüft werden müssen.',
         summaryPoints: [
-          'Die gesetzliche Rente arbeitet im Umlageverfahren und bildet die Basis.',
-          'Spezielle Rentenverträge binden Geld oft bis 62–67 Jahre – prüfe Kosten und Flexibilität.',
-          'Geplante Konzepte (wie das diskutierte Altersvorsorgedepot, Stand 2025/2026) sind noch nicht in Kraft.',
+          'Das Altersvorsorgedepot ergänzt die gesetzliche und betriebliche Altersvorsorge.',
+          'Die Grundzulage steigt mit dem Eigenbeitrag und beträgt in diesem Modell maximal 540 € pro Jahr.',
+          'Bei Vertragsabschluss vor dem 25. Geburtstag kann ein einmaliger Berufseinsteigerbonus von 200 € berücksichtigt werden.',
+          'Rendite ist nicht garantiert; Kosten und Steuern beeinflussen das Ergebnis.',
+          'Das Kapital ist für die Altersvorsorge gedacht und nicht so frei verfügbar wie in einem normalen Depot.',
         ],
+        depotBridge: {
+          label: 'Eigene Förderung simulieren',
+          description:
+            'Trenne Eigenbeiträge, staatliche Zulagen, mögliche Wertentwicklung und Kosten.',
+          to: '/rechner',
+        },
       },
     ],
     sections: [
       {
-        heading: '1. Gesetzliche Rente vs. private Vorsorge',
+        heading: '1. Gesetzlicher Stand und Grundprinzip ab 2027',
         paragraphs: [
-          'Die gesetzliche Rentenversicherung funktioniert nach dem Umlageverfahren: Heutige Beitragszahler finanzieren heutige Ruheständler.',
-          'Bei der privaten Vorsorge baust du eigenes Kapital auf – entweder flexibel im eigenen Depot oder über fest gebundene Verträge.',
+          'Die gesetzliche Grundlage wurde 2026 beschlossen. Zertifizierte Produkte sollen ab dem 1. Januar 2027 angeboten werden. Konkrete Anbieterbedingungen können sich bis zur endgültigen Zertifizierung und Veröffentlichung der Produktunterlagen noch ändern (Rechts- und Informationsstand: November 2026).',
+          'Ein privates Altersvorsorgedepot kann die gesetzliche und betriebliche Altersvorsorge ergänzen. Du zahlst eigene Beiträge ein, der Staat ergänzt bei Förderberechtigung eine Zulage, und das Kapital wird langfristig angelegt.',
         ],
       },
       {
-        heading: '2. Geplante Programme vs. geltendes Recht',
+        heading: '2. Zulagen, Kosten, Besteuerung und Bindung',
         paragraphs: [
-          'Das politisch diskutierte „Altersvorsorgedepot“ (Stand: 2025/2026) ist bislang ein Konzept und noch nicht als aktives Gesetz in Kraft.',
+          'Für die ersten 360 € Eigenbeitrag im Jahr beträgt die Grundzulage in diesem Modell 50 Cent je Euro, darüber bis 1.800 € jährlich 25 Cent je Euro (maximal 540 € pro Jahr). Hinzu kommen ggf. Kinderzulage (bis zu 300 € pro Kind/Jahr) und ein einmaliger Berufseinsteigerbonus von 200 € bei Abschluss vor dem 25. Geburtstag.',
+          'Während Erträge in der Ansparphase innerhalb des Vertrags nicht laufend besteuert werden, ist das Kapital für die Altersvorsorge gebunden und spätere Auszahlungen sind grundsätzlich steuerpflichtig.',
         ],
       },
     ],
     practicalExample: {
-      title: 'Praxisbeispiel: Flexibilität mit 19 Jahren bewahren',
+      title: 'Praxisbeispiel: Nora (19) prüft Budget, Notgroschen und Vertragsregeln',
       scenario:
-        'Tarek (19) soll einen 48 Jahre gesperrten Rentenvertrag mit hohen Abschlusskosten unterschreiben.',
+        'Nora hat in der Ausbildung monatlich 70 € übrig, ihr Notgroschen ist aber noch nicht komplett aufgebaut.',
       takeaway:
-        'Er nutzt stattdessen die VL seines Arbeitgebers und einen flexiblen, kostengünstigen Sparplan ohne jahrzehntelange Sperre.',
+        'Sie zahlt nicht blind die vollen 70 € in einen gebundenen Vertrag ein, sondern baut ihren Notgroschen aus und prüft vorab Bindungsdauer, Effektivkosten, Produktauswahl, Garantien und Auszahlungsregeln.',
     },
     interactiveType: 'retirement-horizon',
     merkeSummary: [
-      'Die gesetzliche Rente bildet die Basis, deckt aber später meist nicht das volle Einkommen ab.',
-      'Kapital in Altersvorsorge-Verträgen ist oft über Jahrzehnte gebunden – halte dir jung genug flexibles Geld frei.',
-      'Geplante politische Konzepte (wie das Altersvorsorgedepot) sind noch keine beschlossenen Gesetze.',
+      'Das Altersvorsorgedepot ergänzt die gesetzliche und betriebliche Altersvorsorge.',
+      'Die Grundzulage steigt mit dem Eigenbeitrag und beträgt in diesem Modell maximal 540 € pro Jahr.',
+      'Bei Vertragsabschluss vor dem 25. Geburtstag kann ein einmaliger Berufseinsteigerbonus von 200 € berücksichtigt werden.',
+      'Rendite ist nicht garantiert; Kosten und Steuern beeinflussen das Ergebnis.',
+      'Das Kapital ist für die Altersvorsorge gedacht und nicht so frei verfügbar wie in einem normalen Depot.',
     ],
     quiz: [
       {
         id: 'altersvorsorge-q1',
-        question: 'Was ist der Kernunterschied zwischen der gesetzlichen Rente und privater kapitalgedeckter Vorsorge?',
-        options: [
-          'Bei der gesetzlichen Rente werden heutige Beiträge direkt an heutige Rentner ausgezahlt (Umlageverfahren); bei privater Vorsorge baust du eigenes Kapital auf.',
-          'Die gesetzliche Rente legt alle Beiträge zu 100 % in Kryptowährungen an.',
-          'Private Vorsorge ist in Deutschland gesetzlich verboten.',
-        ],
-        correctIndex: 0,
+        question:
+          'Du zahlst 30 € pro Monat ein, also 360 € im Jahr. Wie hoch ist die Grundzulage in diesem Modell?',
+        options: ['30 €', '180 €', '360 €', '540 €'],
+        correctIndex: 1,
         explanationCorrect:
-          'Richtig! Die gesetzliche Rente nutzt das Umlageverfahren, während du privat eigenes Kapital aufbaust.',
+          'Richtig! Für die ersten 360 € Eigenbeitrag werden 50 Cent Grundzulage je eingezahltem Euro berücksichtigt.',
         explanationWrong:
-          'Die gesetzliche Rente arbeitet im Umlageverfahren, während private Vorsorge eigenes Kapital anspart.',
+          'Für die ersten 360 € Jahresbeitrag gibt es 50 Cent je Euro – also 180 € Grundzulage.',
       },
       {
         id: 'altersvorsorge-q2',
-        question: 'Worauf solltest du als 18-Jähriger besonders achten, bevor du Geld in einen fest gebundenen Altersvorsorge-Vertrag steckst?',
+        question: 'Warum zeigt der Altersvorsorgedepot-Rechner mehrere mögliche Ergebnisse?',
         options: [
-          'Nur auf die Farbe des Firmenlogos.',
-          'Auf laufende Kosten, Abschlussgebühren und darauf, dass fest gebundenes Geld oft erst ab dem Rentenalter verfügbar ist.',
-          'Darauf, dass man den Vertrag jede Woche kostenlos kündigen kann.',
+          'Weil Rendite, Kosten und Kapitalmarktentwicklung nicht im Voraus feststehen.',
+          'Weil der Staat jedes Jahr eine feste Aktienrendite von 7 % garantiert.',
+          'Weil alle Anbieter gesetzlich exakt dieselben Gebühren verlangen.',
         ],
-        correctIndex: 1,
+        correctIndex: 0,
         explanationCorrect:
-          'Sehr gut! Hohe Kosten schmälern den Zinseszins massiv, und eine feste Sperre passt nicht zu jedem Lebensplan.',
+          'Genau! Kapitalmarktrenditen sind nicht garantiert, und unterschiedliche Kosten sowie spätere Steuern verändern das Ergebnis.',
         explanationWrong:
-          'Prüfe immer zuerst Kosten und Flexibilität.',
+          'Rendite, Kosten und Kapitalmarktentwicklung stehen nicht im Voraus fest.',
       },
       {
         id: 'altersvorsorge-q3',
-        question: 'Wie solltest du mit Berichten über geplante staatliche Vorsorgeprogramme (z. B. Altersvorsorgedepot) umgehen?',
+        question: 'Was sollte Nora (19) vor Abschluss eines Altersvorsorgedepots prüfen?',
         options: [
-          'Sofort Verträge unterschreiben, die mit noch nicht beschlossenen Gesetzen werben.',
-          'Klar zwischen bereits gültigen Gesetzen und bloßen politischen Planungen unterscheiden und offizielle Quellen prüfen.',
-          'Grundsätzlich gar nichts mehr über Finanzen lesen.',
+          'Budget und Notgroschen, Bindungsdauer, Effektivkosten, verfügbare Anlageprodukte, Garantien und Auszahlungsregeln.',
+          'Nur den Werbeslogan auf Social Media.',
+          'Ob sie ihr gesamtes Girokonto sofort auflösen kann.',
         ],
-        correctIndex: 1,
+        correctIndex: 0,
         explanationCorrect:
-          'Genau richtig! Entscheide immer auf Basis geltender Regeln.',
+          'Perfekt! Eine fundierte Entscheidung berücksichtigt Budget, Reserve, Bindung, Gesamtkosten und Vertragsregeln.',
         explanationWrong:
-          'Geplante Programme sind noch nicht in Kraft. Prüfe immer den tatsächlichen Gesetzesstand.',
+          'Prüfe immer zuerst Budget, Notgroschen, Bindungsdauer, Effektivkosten, Produktauswahl, Garantien und Auszahlungsregeln.',
       },
     ],
     nextRoute: '/staat',
@@ -1667,47 +2485,52 @@ export const LESSONS: LessonModule[] = [
     route: '/staat',
     order: 6,
     isCoreTopic: true,
-    categoryLabel: 'Modul 06 · Förderung & Regeln',
+    categoryLabel: 'Modul 06 · Förderung & Anbieter-Check',
     title: 'Hilfe vom Staat verstehen',
     shortTitle: 'Staatliche Hilfe',
-    subtitle: 'Welche Förderungen heute aktiv sind, was nur geplant ist und worauf du achten musst.',
-    oneLineDescription: 'VL, Sparzulage und aktive Regeln von geplanten Ideen unterscheiden.',
-    readingMinutes: 5,
-    hook: 'Welche Zuschüsse vom Chef und vom Staat kannst du heute wirklich nutzen?',
+    subtitle:
+      'Förderprogramme unterscheiden, Voraussetzungen prüfen, Kostenfallen erkennen und Anbieter vergleichen.',
+    oneLineDescription:
+      'VL, Sparzulage, Förderstatus, Kostenfallen und veröffentlichte Anbieterkonditionen prüfen.',
+    readingMinutes: 7,
+    hook: 'Wie unterscheidest du echte Förderung von Werbeversprechen und versteckten Gebühren?',
     intro:
-      'Für Auszubildende und Berufseinsteiger gibt es echte Zuschüsse. Gleichzeitig kursieren im Netz viele Gerüchte über angeblich „geschenktes Geld“. Hier lernst du den Fakten-Check.',
+      'Staatliche Förderung gibt es in unterschiedlichen Programmen – von Vermögenswirksamen Leistungen über das ab 2027 startende Altersvorsorgedepot bis zu Altverträgen mit Bestandsschutz. Hier lernst du den systematischen 4-Fragen-Check und vergleichst echte Konditionen (Rechts- und Informationsstand: November 2026).',
     steps: [
       {
         id: 'staat-1-intro',
         type: 'intro',
-        kicker: 'Modul 06 · Staatliche Hilfe',
-        title: 'Zuschüsse nutzen – Gebührenfallen meiden',
-        hook: 'Manche Förderungen bringen dir in der Ausbildung hunderte Euro extra – andere existieren bisher nur auf dem Papier.',
-        body: 'In dieser Einheit trennst du aktive Programme sauber von politischen Planungen und lernst, worauf es bei den Vertragsbedingungen ankommt.',
+        kicker: 'Modul 06 · Staatliche Förderung',
+        title: 'Förderprogramme unterscheiden – Bedingungen selbst prüfen',
+        hook: 'Nicht jede Förderung passt zu jedem Ziel, und „0 € Depotgebühr“ in der Werbung heißt nicht automatisch 0 € Gesamtkosten.',
+        body: 'In diesem Modul lernst du, wie du verschiedene staatliche Förderprogramme auseinanderhältst, mit vier Prüf-Fragen jeden Vertrag durchleuchtest und veröffentlichte Anbieterangaben sachlich einordnest.',
         visual: 'state-check',
         ctaLabel: 'Lektion starten',
       },
       {
         id: 'staat-2-vl',
         type: 'explanation',
-        kicker: 'Konzept 1 · Berufsstart & Ausbildung',
-        title: 'Vermögenswirksame Leistungen (VL) & Sparzulage',
-        body: 'Viele Ausbildungsbetriebe und Arbeitgeber zahlen monatlich zwischen 6,65 € und 40 € zusätzlich zum Lohn in einen VL-Sparvertrag. Liegt dein Einkommen innerhalb der gesetzlichen Grenzen (Stand: 2025/2026), legt der Staat über die Steuererklärung noch die Arbeitnehmersparzulage obendrauf.',
-        highlightPoint: 'Ein Blick in deinen Ausbildungsvertrag oder eine kurze Frage in der Personalabteilung genügt.',
+        kicker: 'Schritt 2 · VL, Sparzulage & 4 Prüf-Fragen',
+        title: 'Arbeitgeber-Zuschuss nutzen und die 4 Prüf-Fragen stellen',
+        body: 'Viele Ausbildungsbetriebe und Arbeitgeber zahlen monatlich zwischen 6,65 € und 40 € zusätzlich zum Gehalt in einen VL-Vertrag (Vermögenswirksame Leistungen). Innerhalb der gesetzlichen Einkommensgrenzen kommen Arbeitnehmersparzulage oder Wohnungsbauprämie (inkl. U25-Sonderregel ab 16 Jahren) hinzu. Vor jedem Fördervertrag stellst du dir vier feste Fragen: 1. Bin ich förderberechtigt? 2. Wie viel muss ich selbst einzahlen? 3. Welche Kosten und Bindungsfristen gelten? 4. Wann und wie kann ich über das Geld verfügen?',
+        highlightPoint:
+          'Die 4 Prüf-Fragen: 1. Bin ich förderberechtigt? · 2. Wie viel muss ich selbst einzahlen? · 3. Welche Kosten und Bindungsfristen gelten? · 4. Wann und wie kann ich über das Geld verfügen?',
+        visual: 'provider-check',
         moreInfo: {
-          title: 'Wie läuft ein VL-Vertrag ab?',
+          title: 'Die 4 Prüf-Fragen im Detail (Stand: November 2026)',
           points: [
-            'Typische Laufzeit: 6 Jahre einzahlen plus bis zu 1 Jahr Ruhezeit (insgesamt ca. 7 Jahre).',
-            'Gefördert werden u. a. breit gestreute VL-Aktienfondssparpläne und Bausparverträge.',
-            'Die Arbeitnehmersparzulage beantragst du über deine jährliche Einkommensteuererklärung.',
+            '1. Bin ich förderberechtigt? (z. B. Tarif-/Ausbildungsvertrag bei VL, Einkommensgrenzen bei der Sparzulage, Förderberechtigung beim Altersvorsorgedepot).',
+            '2. Wie viel muss ich selbst einzahlen? (Reicht der Arbeitgeberbeitrag oder ist ein eigener Mindestbeitrag nötig?).',
+            '3. Welche Kosten und Bindungsfristen gelten? (Effektivkosten, feste Monatsgebühren, Abschlusskosten, 7 Jahre Sperrfrist bei VL bzw. Bindung bis zum Ruhestand beim Altersvorsorgedepot).',
+            '4. Wann und wie kann ich über das Geld verfügen? (Freie Auszahlung nach Sperrfrist, wohnwirtschaftliche Verwendung oder steuerpflichtige Renten-/Auszahlplanphase).',
           ],
-          sourceNote: 'Quelle: Verbraucherzentrale / Bundesfinanzministerium (Stand: 2025/2026)',
+          sourceNote: 'Quelle: Verbraucherzentrale / Bundesfinanzministerium (Rechts- und Informationsstand: November 2026)',
         },
       },
       {
         id: 'staat-3-check1',
         type: 'question',
-        kicker: 'Verständnis-Check · VL',
+        kicker: 'Schritt 3 · Verständnis-Check',
         title: 'Was steckt hinter VL?',
         question: 'Was sind „Vermögenswirksame Leistungen“ (VL)?',
         options: [
@@ -1717,133 +2540,184 @@ export const LESSONS: LessonModule[] = [
         ],
         correctIndex: 0,
         explanationCorrect:
-          'Richtig. Viele Arbeitgeber zahlen schon in der Ausbildung monatlich VL dazu – nachfragen lohnt sich fast immer.',
+          'Richtig. Viele Arbeitgeber zahlen schon in der Ausbildung monatlich VL dazu – nachfragen in der Personalabteilung lohnt sich fast immer.',
         explanationWrong:
           'VL sind ein freiwilliger oder tariflicher Geldzuschuss deines Arbeitgebers in einen Sparvertrag.',
       },
       {
         id: 'staat-4-interactive',
         type: 'interactive',
-        kicker: 'Konzept 2 · Status-Überblick (Stand: 2025/2026)',
-        title: 'Aktiv oder nur geplant? Prüfe die 5 Programme',
-        body: 'Filtere die Programme nach ihrem aktuellen Gesetzesstatus und prüfe, für wen sie gelten:',
+        kicker: 'Schritt 4 · Programm-Status prüfen',
+        title: 'Aktiv, ab 2027 startend, Bestandsschutz oder nur geplant?',
+        body: 'Filtere die staatlichen Programme nach ihrem aktuellen Status (Rechts- und Informationsstand: November 2026) und vergleiche Voraussetzungen und Bindungsfristen:',
         widget: 'state-status-checker',
       },
       {
-        id: 'staat-5-kostenfalle',
-        type: 'comparison',
-        kicker: 'Konzept 3 · Kritischer Blick',
-        title: 'Förderung ersetzt keinen Kosten-Check',
-        body: 'Auch Wohnungsbauprämie (inkl. U25-Sonderregel ab 16 J.) und Riester-Zulagen sind aktive Regeln. Aber eine Zulage macht einen teuren Vertrag nicht automatisch gut:',
-        leftCard: {
-          label: 'Günstiger Fördervertrag',
-          title: 'Zuschuss wirkt voll mit',
-          badge: 'Sinnvoll',
-          tone: 'accent',
-          points: [
-            'Niedrige Abschluss- und Verwaltungskosten',
-            'Arbeitgeber-VL + staatliche Zulage erhöhen dein Kapital',
-            'Vertragsbedingungen passen zu deinem Zeithorizont',
-          ],
-        },
-        rightCard: {
-          label: 'Überteuerter Vertrag',
-          title: 'Gebühren fressen Prämie auf',
-          badge: 'Vorsicht Kostenfalle',
-          tone: 'warning',
-          points: [
-            'Hohe Abschlussgebühren und laufende Kosten',
-            'Kaum Zinsen oder unflexible jahrzehntelange Bindung',
-            'Trotz staatlicher Prämie bleibt am Ende weniger übrig',
-          ],
-        },
-        takeaway: 'Prüfe immer zuerst die Gesamtkosten und Bedingungen – unterschreibe nie blind wegen des Worts „Staatliche Prämie“.',
+        id: 'staat-5-cost-examples',
+        type: 'interactive',
+        kicker: 'Schritt 5 · Kosten-Check an anonymisierten Praxisbeispielen',
+        title: 'Feste Gebühr, „0 €“-Werbung, Aktionen, Auswahl & Garantie prüfen',
+        body: 'Teste im Gebühren-Simulator, wie sich eine feste Jahresgebühr von 12 € im Vergleich zu prozentualen Kosten bei verschiedenen Depotgrößen auswirkt, und arbeite die 5 anonymisierten Angebotsvergleiche durch:',
+        widget: 'cost-impact-slider',
       },
       {
-        id: 'staat-6-scenario-mia',
+        id: 'staat-6-check-provider',
+        type: 'question',
+        kicker: 'Schritt 6 · Werbeaussagen durchschauen',
+        title: 'Was fehlt bei „0 € Depotgebühr“ und Startaktionen?',
+        question:
+          'Ein Anbieter wirbt mit „0 € Depotgebühr zum Start“. Welche Informationen musst du trotzdem im Preis- und Leistungsverzeichnis prüfen?',
+        options: [
+          'Laufende Produktkosten (TER), Fondsauswahl, Spreads, Ordergebühren sowie wie lange und bis zu welchem Anlagevolumen eine Startaktion gilt.',
+          'Gar keine – „0 € Depotgebühr“ garantiert gesetzlich, dass über 40 Jahre keinerlei Produkt-, Order- oder Folgekosten entstehen.',
+          'Nur die Hintergrundfarbe der Banking-App.',
+        ],
+        correctIndex: 0,
+        explanationCorrect:
+          'Genau richtig! Selbst bei 0 € Depotgebühr können laufende Produktkosten (z. B. ab 0,03 % bis über 1 %), Börsenspreads, Ordergebühren oder zeitliche und betragsmäßige Grenzen bei Erstattungsaktionen (z. B. nur 1 bis 3 Jahre oder bis 25.000 €) anfallen.',
+        explanationWrong:
+          'Vorsicht: „0 € Depotgebühr“ bezieht sich nur auf die Depotführung. Produktkosten, Spreads, Orderkosten, Einschränkungen der ETF-Auswahl und das Ablaufen befristeter Startaktionen musst du immer separat prüfen.',
+        exampleSources: [
+          {
+            providerId: 'ing',
+            providerName: 'ING',
+            productName: 'ING Aktiv',
+            sourceUrls: [
+              'https://www.ing.de/sparen-anlegen/altersvorsorge-depot/',
+              'https://neues-altersvorsorgedepot.de/anbieter/ing',
+            ],
+            informationStatus: 'Stand November 2026',
+          },
+          {
+            providerId: 'traderepublic',
+            providerName: 'Trade Republic',
+            productName: 'Trade Republic Altersvorsorgedepot',
+            sourceUrls: [
+              'https://traderepublic.com/de-de/altersvorsorgedepot',
+              'https://finanzfacts.de/wiki/altersvorsorgedepot/anbieter/trade-republic/',
+            ],
+            informationStatus: 'Stand November 2026',
+          },
+          {
+            providerId: 'quirion',
+            providerName: 'Quirion / Quirin Privatbank',
+            productName: 'Quirion Standard',
+            sourceUrls: [
+              'https://www.quirion.de/vorsorgen',
+              'https://www.quirion.de/post/unser-neuer-standard-fuer-die-altersvorsorge',
+            ],
+            informationStatus: 'Stand November 2026',
+          },
+          {
+            providerId: 'smartbroker',
+            providerName: 'SMARTBROKER+',
+            productName: 'SMARTBROKER+ Standard',
+            sourceUrls: [
+              'https://www.smartbrokerplus.de/de-de/altersvorsorgedepot/',
+              'https://www.wiwo.de/vergleich/altersvorsorgedepot-smartbrokerplus/',
+            ],
+            informationStatus: 'Stand November 2026',
+          },
+        ],
+      },
+      {
+        id: 'staat-7-scenario-mia',
         type: 'scenario',
-        kicker: 'Praxis-Entscheidung · Mia (17)',
+        kicker: 'Schritt 7 · Praxis-Szenario · Mia (17)',
         title: '26 € monatlich vom Ausbildungsbetrieb',
         personTag: 'Mia · 17 Jahre · 1. Lehrjahr',
-        situation: 'Mia entdeckt in ihrem Ausbildungsvertrag, dass ihr Betrieb 26 € monatlich an Vermögenswirksamen Leistungen (VL) zahlt, sobald sie einen passenden Vertrag vorlegt.',
+        situation:
+          'Mia entdeckt in ihrem Ausbildungsvertrag, dass ihr Betrieb 26 € monatlich an Vermögenswirksamen Leistungen (VL) zahlt, sobald sie einen passenden Vertrag vorlegt.',
         contextFacts: [
           { label: 'VL vom Betrieb', value: '26 € / Monat' },
           { label: 'Über 6 Jahre', value: '1.872 € Zuschuss' },
         ],
         question: 'Was ist Mias klügster nächster Schritt?',
         options: [
-          'Bei der Personalabteilung nachfragen, über die Verbraucherzentrale kostengünstige VL-Verträge vergleichen und den Zuschuss mitnehmen',
+          'Bei der Personalabteilung nachfragen, mit den 4 Prüf-Fragen kostengünstige VL-Verträge vergleichen und den Zuschuss mitnehmen',
           'Nichts tun, weil 26 € im Monat keinen Unterschied machen',
-          'Auf die noch nicht beschlossene Frühstart-Rente warten',
+          'Auf die noch nicht verfügbare Frühstart-Rente warten',
         ],
         correctIndex: 0,
         explanationCorrect:
-          'Richtig! 26 € monatlich vom Arbeitgeber summieren sich über 6 Einzahlungsjahre auf 1.872 € extra – plus mögliche Arbeitnehmersparzulage.',
+          'Richtig! 26 € monatlich vom Arbeitgeber summieren sich über 6 Einzahlungsjahre auf 1.872 € extra – plus mögliche staatliche Arbeitnehmersparzulage.',
         explanationWrong:
-          'Lass dir den Arbeitgeber-Zuschuss nicht entgehen: Über 6 Jahre sind 26 € im Monat fast 1.900 € geschenktes Startkapital.',
+          'Prüfe den Arbeitgeber-Zuschuss: Über 6 Einzahlungsjahre sind 26 € im Monat fast 1.900 € zusätzliches Kapital.',
       },
       {
-        id: 'staat-7-check2',
+        id: 'staat-8-check2',
         type: 'question',
-        kicker: 'Wissens-Check · Status & Kosten',
-        title: 'Geplante Programme richtig einordnen',
-        question: 'Welcher Status gilt (Stand: 2025/2026) für Konzepte wie die „Frühstart-Rente“ oder das „Altersvorsorgedepot“?',
+        kicker: 'Schritt 8 · Status sauber trennen',
+        title: 'Altersvorsorgedepot, Riester und Frühstart-Rente unterscheiden',
+        question:
+          'Welche Einordnung entspricht dem Rechts- und Informationsstand November 2026?',
         options: [
-          'Sie sind bereits seit Jahren für jeden automatisch aktiv.',
-          'Es sind politische Vorschläge bzw. geplante Vorhaben, die noch nicht als Gesetz in Kraft sind.',
-          'Jeder 16-Jährige erhält dadurch sofort 500 € aufs Girokonto.',
+          'Das Altersvorsorgedepot ist gesetzlich beschlossen (zertifizierte Produkte ab 01.01.2027), bestehende Riester-Verträge haben Bestandsschutz (kein Neugeschäft ab 2027), und die Frühstart-Rente ist ein separates geplantes Programm.',
+          'Altersvorsorgedepot und Frühstart-Rente sind ein einziges identisches Programm, das schon seit 2020 läuft.',
+          'Alle bestehenden Riester-Verträge werden Ende 2026 automatisch ersatzlos gestrichen.',
         ],
-        correctIndex: 1,
+        correctIndex: 0,
         explanationCorrect:
-          'Exakt! Beide Konzepte sind politische Vorhaben in der Diskussion und noch keine aktiven Förderprogramme.',
+          'Exakt! Die gesetzliche Grundlage für das Altersvorsorgedepot wurde 2026 beschlossen (Produkte ab 01.01.2027). Bestehende Riester-Verträge genießen Bestandsschutz und sollten nicht unüberlegt gekündigt werden. Die Frühstart-Rente ist ein separates geplantes Vorhaben.',
         explanationWrong:
-          'Wichtig: Frühstart-Rente und Altersvorsorgedepot sind bisher politische Vorschläge (Stand: 2025/2026) und noch nicht in Kraft.',
+          'Trenne die drei Programme sauber: Altersvorsorgedepot (beschlossen, Start ab 01.01.2027), Riester (Bestandsschutz für Altverträge, kein Neugeschäft ab 2027) und Frühstart-Rente (separat geplant, noch nicht verfügbar).',
       },
       {
-        id: 'staat-8-completion',
+        id: 'staat-9-provider-overview',
+        type: 'interactive',
+        kicker: 'Schritt 9 · Veröffentlichte Anbieterinformationen (Stand: November 2026)',
+        title: 'Anbieterübersicht zum Altersvorsorgedepot',
+        body: 'Nachdem du die Förderregeln und Kostenfallen kennst, kannst du hier die veröffentlichten Angaben von 11 Anbietern sachlich nach Produkteigenschaften und Informationsstand filtern:',
+        widget: 'provider-comparison',
+      },
+      {
+        id: 'staat-10-completion',
         type: 'completion',
         kicker: 'Modul 06 abgeschlossen',
         title: 'Alle 6 Kernmodule geschafft!',
-        body: 'Du kannst jetzt aktive Förderungen nutzen, Kostenfallen erkennen und geplante Gesetze souverän einordnen.',
+        body: 'Du kannst staatliche Förderprogramme jetzt nach ihrem Status unterscheiden, Bedingungen mit vier klaren Fragen prüfen und Anbieterangaben ohne Werbebrille vergleichen.',
         summaryPoints: [
-          'Aktiv (Stand 2025/2026): VL vom Arbeitgeber, Arbeitnehmersparzulage, Wohnungsbauprämie (inkl. U25-Regel) und Riester.',
-          'Nur geplant (Stand 2025/2026): Frühstart-Rente und gefördertes Altersvorsorgedepot sind noch nicht in Kraft.',
-          'Prüfe bei jedem Fördervertrag immer zuerst die Gesamtkosten und Haltefristen.',
+          'Aktiv nutzbar: Vermögenswirksame Leistungen (VL), Arbeitnehmersparzulage und Wohnungsbauprämie (inkl. U25-Regel).',
+          'Ab 01.01.2027: Zertifizierte Altersvorsorgedepots auf Basis des 2026 beschlossenen Gesetzes; konkrete Anbieterbedingungen können sich bis zur Zertifizierung noch ändern.',
+          'Bestandsschutz vs. Planung: Bestehende Riester-Verträge laufen weiter (nicht unüberlegt kündigen); die Frühstart-Rente ist ein separates geplantes Programm.',
+          'Stelle vor jedem Vertrag die 4 Prüf-Fragen zu Förderberechtigung, Eigenbeitrag, Gesamtkosten/Bindung und Verfügbarkeit.',
         ],
         depotBridge: {
-          label: 'Im Übungsdepot ausprobieren',
-          description: 'Wende dein Wissen aus allen 6 Kernmodulen jetzt risikofrei im virtuellen Übungsdepot an.',
-          to: '/depot',
+          label: 'Im Vorsorgedepot-Rechner durchspielen',
+          description:
+            'Simuliere im Rechner unterschiedliche Kostenannahmen, Zulagen und Laufzeiten.',
+          to: '/rechner',
         },
       },
     ],
     sections: [
       {
-        heading: '1. Aktive Förderungen: VL & Arbeitnehmersparzulage',
+        heading: '1. Förderprogramme und die 4 Prüf-Fragen',
         paragraphs: [
-          'Viele Betriebe zahlen monatlich Vermögenswirksame Leistungen (VL) zusätzlich zum Lohn. Innerhalb der Einkommensgrenzen (Stand: 2025/2026) gibt es dazu die staatliche Arbeitnehmersparzulage.',
-          'Auch Wohnungsbauprämie (inkl. U25-Sonderregel) und Riester-Zulagen sind aktive Regelungen, müssen aber immer auf ihre Vertragskosten geprüft werden.',
+          'Viele Betriebe zahlen monatlich Vermögenswirksame Leistungen (VL) zusätzlich zum Lohn. Innerhalb der Einkommensgrenzen (Rechts- und Informationsstand: November 2026) gibt es dazu die staatliche Arbeitnehmersparzulage sowie bei Bausparverträgen die Wohnungsbauprämie (inkl. U25-Sonderregel).',
+          'Prüfe vor jedem Abschluss: 1. Bin ich förderberechtigt? 2. Wie viel muss ich selbst einzahlen? 3. Welche Kosten und Bindungsfristen gelten? 4. Wann und wie kann ich über das Geld verfügen?',
         ],
       },
       {
-        heading: '2. Geplante Programme vs. geltendes Recht',
+        heading: '2. Altersvorsorgedepot ab 2027, Riester-Bestandsschutz & Frühstart-Rente',
         paragraphs: [
-          '„Frühstart-Rente“ und „Altersvorsorgedepot“ sind politische Konzepte (Stand: 2025/2026) und derzeit noch nicht als aktive Programme nutzbar.',
+          'Die gesetzliche Grundlage wurde 2026 beschlossen. Zertifizierte Produkte sollen ab dem 1. Januar 2027 angeboten werden. Konkrete Anbieterbedingungen können sich bis zur endgültigen Zertifizierung und Veröffentlichung der Produktunterlagen noch ändern.',
+          'Bestehende Riester-Verträge haben Bestandsschutz (kein Neugeschäft ab 2027) und sollten individuell auf Kosten, Garantien und Wechselbedingungen geprüft werden. Die Frühstart-Rente ist dagegen ein separates geplantes Programm für Kinder und Jugendliche.',
         ],
       },
     ],
     practicalExample: {
-      title: 'Praxisbeispiel: Mia (17) sichert sich 26 € VL monatlich',
+      title: 'Praxisbeispiel: Mia (17) nutzt 26 € VL monatlich nach dem 4-Fragen-Check',
       scenario:
         'Mias Ausbildungsbetrieb zahlt 26 € monatlich an Vermögenswirksamen Leistungen (VL).',
       takeaway:
-        'Über 6 Jahre sichert sich Mia so über 1.800 € Arbeitgeber-Zuschuss plus staatliche Arbeitnehmersparzulage.',
+        'Über 6 Einzahlungsjahre summiert sich der Arbeitgeber-Zuschuss auf 1.872 € plus mögliche staatliche Arbeitnehmersparzulage – vorausgesetzt, Mia wählt einen Vertrag mit niedrigen Kosten.',
     },
     interactiveType: 'state-support',
     merkeSummary: [
-      'Unterscheide strikt zwischen bereits aktiven Förderungen (VL, Arbeitnehmersparzulage) und geplanten Ideen (Frühstart-Rente).',
-      'Jede staatliche Förderung ist an persönliche Voraussetzungen, Einkommensgrenzen und Haltefristen geknüpft.',
-      'Prüfe immer zuerst die Gesamtkosten eines Vertrags.',
+      'Unterscheide zwischen aktiven Förderungen (VL, Sparzulage, Wohnungsbauprämie), dem ab 01.01.2027 startenden Altersvorsorgedepot, Riester-Bestandsverträgen und der geplanten Frühstart-Rente.',
+      'Prüfe jeden Vertrag mit den 4 Fragen: Förderberechtigung, Eigenbeitrag, Kosten/Bindungsfrist und Verfügbarkeit.',
+      'Lass dich nicht von „0 € Depotgebühr“ oder kurzen Startaktionen blenden, sondern prüfe Effektivkosten, Fondsauswahl und Folgekonditionen.',
     ],
     quiz: [
       {
@@ -1862,31 +2736,33 @@ export const LESSONS: LessonModule[] = [
       },
       {
         id: 'staat-q2',
-        question: 'Welcher Status gilt (Stand: 2025/2026) für Konzepte wie die „Frühstart-Rente“ oder das „Altersvorsorgedepot“?',
+        question:
+          'Welcher rechtliche Stand gilt (Rechts- und Informationsstand: November 2026) für das Altersvorsorgedepot und die Frühstart-Rente?',
         options: [
-          'Sie sind bereits seit 2010 für jeden automatisch aktiv.',
-          'Es handelt sich um politische Vorschläge bzw. geplante Vorhaben, die noch nicht als Gesetz in Kraft sind.',
+          'Beide sind bereits seit 2010 identisch und automatisch für jeden aktiv.',
+          'Die gesetzliche Grundlage für das Altersvorsorgedepot wurde 2026 beschlossen (Produkte ab 01.01.2027); die Frühstart-Rente ist dagegen ein separates geplantes Programm.',
           'Jeder 16-Jährige bekommt dadurch automatisch 500 € bar ausgezahlt.',
         ],
         correctIndex: 1,
         explanationCorrect:
-          'Exakt! Es sind politische Vorhaben in der Diskussion.',
+          'Exakt! Das Altersvorsorgedepot startet mit zertifizierten Produkten ab dem 1. Januar 2027, während die Frühstart-Rente ein separates geplantes Vorhaben ist.',
         explanationWrong:
-          'Frühstart-Rente und Altersvorsorgedepot sind bisher politische Vorschläge (Stand: 2025/2026).',
+          'Wichtig: Die gesetzliche Grundlage für das Altersvorsorgedepot wurde 2026 beschlossen (Produkte ab 01.01.2027). Die Frühstart-Rente ist ein separates geplantes Programm.',
       },
       {
         id: 'staat-q3',
-        question: 'Warum sollte man einen Sparvertrag niemals allein wegen einer staatlichen Zulage unterschreiben?',
+        question:
+          'Welche vier Prüf-Fragen helfen dir, bevor du einen staatlich geförderten Vertrag unterschreibst?',
         options: [
-          'Weil hohe Abschluss- und laufende Vertragskosten den Vorteil der Zulage wieder auffressen können.',
-          'Weil staatliche Zulagen immer verboten sind.',
-          'Weil man Zulagen nur bekommt, wenn man den Vertrag nie liest.',
+          '1. Bin ich förderberechtigt? 2. Wie viel muss ich selbst einzahlen? 3. Welche Kosten und Bindungsfristen gelten? 4. Wann und wie kann ich über das Geld verfügen?',
+          'Nur die Frage, welcher Anbieter die bunteste Werbung schaltet.',
+          'Ob der Vertrag innerhalb von 3 Tagen das Geld verdoppelt.',
         ],
         correctIndex: 0,
         explanationCorrect:
-          'Genau so ist es! Ein guter Vertrag muss kostengünstig sein.',
+          'Genau so ist es! Mit diesen vier Fragen prüfst du systematisch Voraussetzungen, Eigenbeitrag, Kosten und Verfügbarkeit.',
         explanationWrong:
-          'Hohe Gebühren können teurer sein als die staatliche Förderung.',
+          'Prüfe immer Förderberechtigung, Eigenbeitrag, Kosten/Bindungsfristen und Verfügbarkeit.',
       },
     ],
     nextRoute: '/taschengeld',
@@ -1912,23 +2788,25 @@ export const LESSONS: LessonModule[] = [
         kicker: 'Praxis-Modul · Budget & Taschengeld',
         title: 'Dein monatlicher Kassensturz',
         hook: 'Kleine Abos und Snacks summieren sich oft unbemerkt auf 50 € bis 100 € im Monat.',
-        body: 'In diesem Praxis-Modul prüfst du deine Einnahmen und Ausgaben und lernst eine mögliche Lernaufteilung für deinen Überschuss kennen.',
+        body: 'In diesem Praxis-Modul prüfst du deine Einnahmen und Ausgaben und lernst die Dreiteilung zwischen kurzfristiger Reserve, freiem langfristigem Sparen und gebundener Altersvorsorge kennen.',
         visual: 'budget-balance',
         ctaLabel: 'Praxis-Modul starten',
       },
       {
         id: 'taschengeld-2-abocheck',
         type: 'explanation',
-        kicker: 'Konzept 1 · Überblick gewinnen',
+        kicker: 'Konzept 1 · Überblick & Dreiteilung',
         title: 'Wohin fließt dein Geld jeden Monat?',
-        body: 'Stell einmal im Monat deine sicheren Einnahmen (Taschengeld, Nebenjob, Ausbildungsvergütung) deinen festen und variablen Ausgaben gegenüber. Oft verstecken sich in ungenutzten Streaming- oder Gaming-Abos schon 15 € bis 25 € pro Monat.',
-        highlightPoint: 'Amir (17) kündigt zwei ungenutzte Abos für 20 € / Monat – und hat sofort Geld für seinen Sparplan frei.',
+        body: 'Stell einmal im Monat deine sicheren Einnahmen (Taschengeld, Nebenjob, Ausbildungsvergütung) deinen festen und variablen Ausgaben gegenüber. Bleibt am Monatsende ein Überschuss, unterscheidest du drei Zwecke: 1. kurzfristige Reserve (Tagesgeld/Notgroschen), 2. freies langfristiges Sparen (flexibles Depot) und 3. gebundene Altersvorsorge (z. B. Altersvorsorgedepot). Dein gesamter Überschuss sollte niemals automatisch in einen gebundenen Vertrag fließen.',
+        highlightPoint:
+          'Dreiteilung für deinen Überschuss: 1. kurzfristige Reserve · 2. freies langfristiges Sparen · 3. gebundene Altersvorsorge.',
         visual: 'abo-check',
         moreInfo: {
-          title: 'Die 50-30-20-Orientierung (eine mögliche Lernaufteilung)',
+          title: 'Warum nicht den gesamten Überschuss fest binden?',
           points: [
-            'Viele junge Erwachsene nutzen als grobe Idee: ca. 50 % Fixkosten, 30 % Freizeit & Wünsche, 20 % Rücklagen & Sparen.',
-            'Wohnst du noch zu Hause oder hast du ein anderes Einkommen, sieht deine Aufteilung natürlich anders aus – es gibt keine starre Pflichtformel.',
+            '1. Kurzfristige Reserve: Dein Notgroschen auf dem Tagesgeldkonto schützt dich bei Reparaturen, Umzug oder Prüfungsphasen.',
+            '2. Freies langfristiges Sparen: Im normalen Depot bleibt dein Geld vor dem Rentenbeginn erreichbar.',
+            '3. Gebundene Altersvorsorge: Ein Altersvorsorgedepot bietet staatliche Zulagen, bindet das Kapital aber zweckgebunden bis zum Ruhestand.',
           ],
         },
       },
@@ -1964,15 +2842,15 @@ export const LESSONS: LessonModule[] = [
         title: '50 € übrig – wie vorgehen?',
         question: 'Du hast nach allen Ausgaben 50 € im Monat übrig, besitzt aber noch keinen Notgroschen. Was ist sinnvoll?',
         options: [
-          'Zuerst den Notgroschen auf dem Tagesgeld aufbauen (oder sinnvoll aufteilen, z. B. 35 € Tagesgeld-Puffer und 15 € Lern-Sparplan).',
-          'Die vollen 50 € in ein hochspekulatives Krypto-Projekt stecken.',
+          'Zuerst die kurzfristige Reserve (Notgroschen) auf dem Tagesgeld aufbauen und den Überschuss nicht komplett in eine gebundene Altersvorsorge stecken.',
+          'Die vollen 50 € sofort bis zum 67. Lebensjahr fest binden.',
           'Alles sofort für Konsum auf Raten ausgeben.',
         ],
         correctIndex: 0,
         explanationCorrect:
-          'Perfekt! Ein sicherer Puffer auf dem Tagesgeldkonto schützt dich vor ungeplanten Ausgaben.',
+          'Perfekt! Ein sicherer Puffer auf dem Tagesgeldkonto hat Vorrang. Danach kannst du zwischen freiem langfristigem Sparen und gebundener Altersvorsorge abwägen.',
         explanationWrong:
-          'Ohne Notgroschen solltest du zuerst deine Sicherheitsreserve auf dem Tagesgeldkonto aufbauen.',
+          'Ohne Notgroschen solltest du zuerst deine kurzfristige Reserve aufbauen, statt den gesamten Überschuss langfristig zu binden.',
       },
       {
         id: 'taschengeld-6-completion',
@@ -1982,11 +2860,11 @@ export const LESSONS: LessonModule[] = [
         body: 'Du weißt jetzt, wie du Einnahmen und Ausgaben im Blick behältst und deinen Überschuss überlegt aufteilst.',
         summaryPoints: [
           'Ein ehrlicher Kassensturz schützt davor, mehr Geld zu verplanen, als monatlich hereinkommt.',
-          'Teile deinen Überschuss immer zwischen kurzfristiger Reserve (Tagesgeld) und langfristigem Sparziel auf.',
+          'Unterscheide bei deinem Überschuss zwischen kurzfristiger Reserve, freiem langfristigem Sparen und gebundener Altersvorsorge.',
         ],
         depotBridge: {
-          label: 'Zum großen Budget- & Zinseszins-Rechner',
-          description: 'Nutze jederzeit den Rechner, um Budget und langfristiges Wachstum gemeinsam durchzuspielen.',
+          label: 'Zum Budget-, Zinseszins- & Vorsorgedepot-Rechner',
+          description: 'Nutze jederzeit den Rechner, um Budget, freies Sparen und das Altersvorsorgedepot gemeinsam durchzuspielen.',
           to: '/rechner',
         },
       },
@@ -2000,9 +2878,10 @@ export const LESSONS: LessonModule[] = [
         ],
       },
       {
-        heading: '2. Eine mögliche Lernaufteilung',
+        heading: '2. Kurzfristige Reserve, freies Sparen und gebundene Altersvorsorge',
         paragraphs: [
-          'Teile deinen monatlichen Überschuss zwischen kurzfristigem Sicherheitspuffer (Tagesgeld) und langfristigem Sparplan auf – passend zu deiner Lebenssituation.',
+          'Unterscheide drei Aufgaben: 1. kurzfristige Reserve auf dem Tagesgeldkonto, 2. freies langfristiges Sparen im flexiblen Depot und 3. gebundene Altersvorsorge mit staatlicher Förderung.',
+          'Zahle niemals deinen gesamten monatlichen Überschuss unflexibel in einen gebundenen Vertrag ein, solange deine Reserve und deine mittelfristigen Ziele nicht abgedeckt sind.',
         ],
       },
     ],
@@ -2011,12 +2890,12 @@ export const LESSONS: LessonModule[] = [
       scenario:
         'Amir (17) stellt fest, dass er zwei ungenutzte Abos für zusammen 20 € im Monat bezahlt.',
       takeaway:
-        'Er kündigt beide Abos und leitet die 20 € monatlich in seinen Sparplan um.',
+        'Er kündigt beide Abos und teilt das frei gewordene Geld bewusst zwischen seiner kurzfristigen Reserve und seinem langfristigen Sparziel auf.',
     },
     interactiveType: 'budget-planner',
     merkeSummary: [
       'Ein ehrlicher Kassensturz schützt davor, mehr Geld zu verplanen, als monatlich hereinkommt.',
-      'Teile deinen monatlichen Überschuss zwischen kurzfristiger Reserve (Tagesgeld) und langfristigem Sparziel auf.',
+      'Unterscheide klar zwischen kurzfristiger Reserve, freiem langfristigem Sparen und gebundener Altersvorsorge.',
     ],
     quiz: [
       {
@@ -2035,17 +2914,17 @@ export const LESSONS: LessonModule[] = [
       },
       {
         id: 'taschengeld-q2',
-        question: 'Du hast nach allen Ausgaben 50 € im Monat übrig, besitzt aber noch keinen Notgroschen. Wie gehst du sinnvoll vor?',
+        question: 'Welche drei Bereiche solltest du unterscheiden, wenn am Monatsende Geld übrig bleibt?',
         options: [
-          'Zuerst den Notgroschen auf dem Tagesgeldkonto aufbauen (oder den Betrag aufteilen: z. B. 35 € Notgroschen, 15 € Lern-Sparplan).',
-          'Die vollen 50 € in ein hochspekulatives Krypto-Projekt stecken.',
-          'Das Geld komplett auf dem unverzinsten Girokonto vergessen.',
+          'Kurzfristige Reserve, freies langfristiges Sparen und gebundene Altersvorsorge.',
+          'Nur Girokonto und Dispokredit.',
+          'Den gesamten Überschuss immer sofort bis zum Rentenbeginn festlegen.',
         ],
         correctIndex: 0,
         explanationCorrect:
-          'Perfekt! Ein sicherer Puffer auf dem Tagesgeldkonto gibt dir Rückhalt für unvorhergesehene Kosten.',
+          'Perfekt! So hältst du genug Geld flexibel verfügbar und bindest nur den Teil, auf den du langfristig verzichten kannst.',
         explanationWrong:
-          'Ohne Notgroschen solltest du zuerst deine Sicherheitsreserve auf dem Tagesgeldkonto aufbauen.',
+          'Unterscheide immer zwischen kurzfristiger Reserve, freiem langfristigem Sparen und gebundener Altersvorsorge.',
       },
     ],
   },
@@ -2071,7 +2950,6 @@ export function getNextLesson(lessonId: string): LessonModule | null {
   if (!current || !current.nextRoute) return null;
   return getLessonByRoute(current.nextRoute) ?? null;
 }
-
 
 export const DAILY_QUESTIONS: DailyQuestionItem[] = [
   {
@@ -2120,18 +2998,49 @@ export const DAILY_QUESTIONS: DailyQuestionItem[] = [
       'Dein Notgroschen muss jederzeit verfügbar sein und darf nicht im Wert schwanken – genau dafür ist ein Tagesgeldkonto da.',
   },
   {
-    id: 'dq-staat-status',
-    topicId: 'staat',
-    topicLabel: 'Staatliche Hilfe',
+    id: 'dq-grundzulage-360',
+    topicId: 'altersvorsorgedepot',
+    topicLabel: 'Vorsorgedepot',
     question:
-      'Welche dieser Förderungen ist (Stand: 2025/2026) bereits ein aktives Gesetz, das viele Auszubildende direkt nutzen können?',
+      'Du zahlst 30 € pro Monat (360 € im Jahr) in ein gefördertes Altersvorsorgedepot ein. Wie hoch ist die jährliche Grundzulage in diesem Modell?',
     options: [
-      'Vermögenswirksame Leistungen (VL) vom Arbeitgeber plus Arbeitnehmersparzulage.',
-      'Die staatliche Frühstart-Rente für alle Schüler.',
-      'Ein steuerfreies Krypto-Startguthaben vom Finanzamt.',
+      '180 € (50 Cent Grundzulage je eingezahltem Euro für die ersten 360 € Jahresbeitrag).',
+      '30 € pauschal für das gesamte Jahr.',
+      '540 € unabhängig vom eigenen Beitrag.',
     ],
     correctIndex: 0,
     explanation:
-      'Vermögenswirksame Leistungen (VL) und die Arbeitnehmersparzulage sind bestehende Regelungen. Die Frühstart-Rente ist dagegen bislang nur ein politisches Vorhaben.',
+      'Für die ersten 360 € Eigenbeitrag pro Jahr werden in diesem Modell 50 Cent Grundzulage je Euro berücksichtigt – bei 360 € Jahresbeitrag also 180 €.',
+  },
+  {
+    id: 'dq-zulage-vs-rendite',
+    topicId: 'altersvorsorgedepot',
+    topicLabel: 'Vorsorgedepot',
+    question:
+      'Worin liegt beim Altersvorsorgedepot der wichtigste Unterschied zwischen staatlicher Zulage und Kapitalmarktrendite?',
+    options: [
+      'Die Zulage berechnet sich nach gesetzlichen Förderregeln aus deinem Beitrag; die Kapitalmarktrendite schwankt und ist nicht garantiert.',
+      'Die Kapitalmarktrendite ist gesetzlich fest garantiert, während die Zulage täglich an der Börse schwankt.',
+      'Beide Werte stehen schon bei Vertragsabschluss auf den Cent genau für 45 Jahre fest.',
+    ],
+    correctIndex: 0,
+    explanation:
+      'Staatliche Zulagen folgen klaren Förderregeln bei Erfüllung der Voraussetzungen. Die Wertentwicklung am Kapitalmarkt ist dagegen eine ungarantierte Modellannahme.',
+  },
+  {
+    id: 'dq-null-euro-depotgebuehr',
+    topicId: 'staat',
+    topicLabel: 'Staatliche Hilfe',
+    question:
+      'Was bedeutet die Werbeaussage „0 € Depotgebühr“ bei einem Altersvorsorgedepot?',
+    options: [
+      'Es fällt keine separate Grundgebühr für die Depotführung an – laufende Produktkosten (TER), Spreads, Orderkosten oder zeitliche Grenzen von Startaktionen müssen trotzdem geprüft werden.',
+      'Das gesamte Produkt ist über die gesamte Laufzeit von 40 Jahren garantiert frei von sämtlichen Fonds-, Transaktions- und Folgekosten.',
+      'Der Staat übernimmt automatisch alle Fonds- und Börsengebühren.',
+    ],
+    correctIndex: 0,
+    explanation:
+      '„0 € Depotgebühr“ heißt nicht automatisch 0 € Gesamtkosten. Prüfe immer Produktkosten, Auswahlbeschränkungen, Spreads und die Dauer möglicher Erstattungsaktionen.',
   },
 ];
+

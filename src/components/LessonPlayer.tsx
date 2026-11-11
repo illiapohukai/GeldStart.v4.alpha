@@ -30,6 +30,7 @@ import {
   type LessonStep,
   type QuestionStep,
   type ScenarioStep,
+  type TripleComparisonStep,
   type VisualChoiceStep,
 } from '@/lib/lessons';
 import { useProgress } from '@/lib/progress-context';
@@ -43,6 +44,7 @@ const STEP_TYPE_LABELS: Record<LessonStep['type'], string> = {
   intro: 'Einstieg',
   explanation: 'Kern-Idee',
   comparison: 'Vergleich',
+  triple_comparison: 'Vergleich',
   visual_choice: 'Entscheidung',
   question: 'Verständnis-Check',
   scenario: 'Alltags-Szenario',
@@ -271,7 +273,8 @@ export function LessonPlayer({ lesson }: LessonPlayerProps) {
           <ExplanationStepView step={currentStep} />
         )}
 
-        {currentStep.type === 'comparison' && (
+        {(currentStep.type === 'comparison' ||
+          currentStep.type === 'triple_comparison') && (
           <ComparisonStepView step={currentStep} />
         )}
 
@@ -453,6 +456,47 @@ function ExplanationStepView({ step }: { step: ExplanationStep }) {
         {step.body}
       </p>
 
+      {step.visual === 'allowance-stack' && (
+        <div
+          data-testid="allowance-stack-badges"
+          className="grid grid-cols-1 sm:grid-cols-3 gap-3"
+        >
+          <div className="rounded-2xl border border-primary/30 bg-accent/20 p-3.5 space-y-1">
+            <span className="inline-block rounded-lg bg-primary px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-primary-foreground">
+              Jährlich
+            </span>
+            <p className="text-sm font-extrabold text-foreground">
+              Grundzulage
+            </p>
+            <p className="font-mono text-xs font-semibold text-muted-foreground">
+              Bis zu 540 € / Jahr (bei 1.800 € Eigenbeitrag)
+            </p>
+          </div>
+          <div className="rounded-2xl border border-border bg-secondary/50 p-3.5 space-y-1">
+            <span className="inline-block rounded-lg bg-card px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-primary">
+              Einmalig
+            </span>
+            <p className="text-sm font-extrabold text-foreground">
+              Berufseinsteigerbonus
+            </p>
+            <p className="font-mono text-xs font-semibold text-muted-foreground">
+              200 € einmalig bei Abschluss vor dem 25. Geburtstag
+            </p>
+          </div>
+          <div className="rounded-2xl border border-border bg-secondary/50 p-3.5 space-y-1">
+            <span className="inline-block rounded-lg bg-card px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-primary">
+              Pro Kind & Jahr
+            </span>
+            <p className="text-sm font-extrabold text-foreground">
+              Kinderzulage
+            </p>
+            <p className="font-mono text-xs font-semibold text-muted-foreground">
+              1 € je 1 € Eigenbeitrag (max. 300 € / Jahr je Kind)
+            </p>
+          </div>
+        </div>
+      )}
+
       {step.highlightPoint && (
         <div className="rounded-2xl border border-primary/25 bg-accent/20 p-4 sm:p-5 flex items-start gap-3">
           <Lightbulb className="h-5 w-5 text-primary shrink-0 mt-0.5" />
@@ -465,7 +509,20 @@ function ExplanationStepView({ step }: { step: ExplanationStep }) {
   );
 }
 
-function ComparisonStepView({ step }: { step: ComparisonStep }) {
+function ComparisonStepView({
+  step,
+}: {
+  step: ComparisonStep | TripleComparisonStep;
+}) {
+  const cards =
+    step.type === 'triple_comparison'
+      ? step.cards
+      : [step.leftCard, step.rightCard];
+  const gridColsClass =
+    step.type === 'triple_comparison'
+      ? 'grid-cols-1 sm:grid-cols-3'
+      : 'grid-cols-1 sm:grid-cols-2';
+
   return (
     <div className="space-y-5">
       <span className="inline-block text-xs font-bold uppercase tracking-wider text-primary">
@@ -480,8 +537,8 @@ function ComparisonStepView({ step }: { step: ComparisonStep }) {
         {step.body}
       </p>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-        {[step.leftCard, step.rightCard].map((card, idx) => {
+      <div className={`grid ${gridColsClass} gap-3.5`}>
+        {cards.map((card, idx) => {
           const isAccent = card.tone === 'accent';
           const isWarning = card.tone === 'warning';
           return (

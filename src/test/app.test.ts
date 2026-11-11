@@ -6,9 +6,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  BASIC_ALLOWANCE_REFERENCE_POINTS,
+  calculateBasicAllowance,
   calculateBudgetSplit,
+  calculateCareerStarterBonus,
+  calculateChildAllowance,
   calculateCompoundInterest,
+  calculateEffectiveAnnualCostRate,
   calculateInflationPurchasingPower,
+  calculateRetirementProjection,
 } from '../lib/calculator';
 import {
   evaluatePortfolioValuation,
@@ -22,12 +28,15 @@ import {
   sanitizeDepotState,
 } from '../lib/depot-storage';
 import {
+  ALTERSVORSORGEDEPOT_PROVIDERS,
+  ANONYMIZED_PROVIDER_EXAMPLES,
   BONUS_LESSONS,
   CORE_LESSONS,
   getLessonById,
   getLessonByRoute,
   getNextLesson,
   LESSONS,
+  STATE_SUPPORT_PROGRAMS,
 } from '../lib/lessons';
 import {
   DEMO_INSTRUMENTS,
@@ -117,7 +126,87 @@ describe('Compound Interest & Inflation Calculator (Pure Math)', () => {
   });
 });
 
-describe('Step-Based Lesson Architecture & Micro-Learning Content', () => {
+describe('Altersvorsorgedepot (2027) Allowance & Retirement Projection Math', () => {
+  it('calculates basic allowance (Grundzulage) across all 6 reference points and caps at 540 €', () => {
+    assert.equal(calculateBasicAllowance(-50), 0);
+    assert.equal(calculateBasicAllowance(0), 0);
+    assert.equal(calculateBasicAllowance(120), 60);
+    assert.equal(calculateBasicAllowance(300), 150);
+    assert.equal(calculateBasicAllowance(360), 180);
+    assert.equal(calculateBasicAllowance(600), 240);
+    assert.equal(calculateBasicAllowance(1200), 390);
+    assert.equal(calculateBasicAllowance(1800), 540);
+    assert.equal(calculateBasicAllowance(2400), 540);
+
+    for (const ref of BASIC_ALLOWANCE_REFERENCE_POINTS) {
+      assert.equal(calculateBasicAllowance(ref.annualContribution), ref.basicAllowance);
+      assert.equal(ref.annualContribution + ref.basicAllowance, ref.totalInvestedPerYear);
+    }
+  });
+
+  it('calculates child allowance (Kinderzulage) at 1 € per 1 € capped at 300 € per child', () => {
+    assert.equal(calculateChildAllowance(1200, 0), 0);
+    assert.equal(calculateChildAllowance(200, 1), 200);
+    assert.equal(calculateChildAllowance(300, 1), 300);
+    assert.equal(calculateChildAllowance(360, 1), 300);
+    assert.equal(calculateChildAllowance(1800, 1), 300);
+    assert.equal(calculateChildAllowance(300, 2), 600);
+  });
+
+  it('calculates one-time career starter bonus (Berufseinsteigerbonus) only under age 25', () => {
+    assert.equal(calculateCareerStarterBonus(18, true), 200);
+    assert.equal(calculateCareerStarterBonus(24, true), 200);
+    assert.equal(calculateCareerStarterBonus(25, true), 0);
+    assert.equal(calculateCareerStarterBonus(19, false), 0);
+  });
+
+  it('projects retirement components separately and handles edge cases safely', () => {
+    const proj = calculateRetirementProjection({
+      startAge: 19,
+      retirementAge: 67,
+      monthlyContribution: 30,
+      assumedGrossAnnualReturnPercent: 5,
+      estimatedAnnualCostPercent: 0.35,
+      eligibleChildren: 0,
+      careerStarterBonusEligible: true,
+    });
+
+    assert.equal(proj.years, 48);
+    assert.equal(proj.annualPersonalContribution, 360);
+    assert.equal(proj.annualBasicAllowance, 180);
+    assert.equal(proj.personalContributions, 360 * 48);
+    assert.equal(proj.basicAllowances, 180 * 48);
+    assert.equal(proj.childAllowances, 0);
+    assert.equal(proj.careerStarterBonus, 200);
+    assert.ok(proj.assumedMarketGrowth > 0);
+    assert.ok(proj.estimatedCosts > 0);
+    assert.ok(proj.projectedValueBeforeTax > proj.personalContributions + proj.basicAllowances);
+
+    // Edge case: retirementAge < startAge & zero return & zero contribution
+    const edge = calculateRetirementProjection({
+      startAge: 30,
+      retirementAge: 20,
+      monthlyContribution: 0,
+      assumedGrossAnnualReturnPercent: 0,
+      estimatedAnnualCostPercent: 1.5,
+      eligibleChildren: -2,
+      careerStarterBonusEligible: true,
+    });
+    assert.equal(edge.years, 0);
+    assert.equal(edge.personalContributions, 0);
+    assert.equal(edge.basicAllowances, 0);
+    assert.equal(edge.careerStarterBonus, 0);
+    assert.equal(edge.projectedValueBeforeTax, 0);
+
+    // Effective annual cost rate for 12 € fixed fee on 2,000 € pot
+    const costAt2000 = calculateEffectiveAnnualCostRate(2000, 12, 0.35);
+    assert.equal(costAt2000.fixedFeePercentOfPortfolio, 0.6);
+    assert.equal(costAt2000.totalEffectiveCostPercent, 0.95);
+    assert.equal(costAt2000.totalAnnualCostEur, 19);
+  });
+});
+
+describe('Step-Based Lesson Architecture, State Support & Provider Overview', () => {
   it('exposes 6 core modules in order 1..6 and 1 bonus module', () => {
     assert.equal(CORE_LESSONS.length, 6);
     assert.equal(BONUS_LESSONS.length, 1);
@@ -131,8 +220,8 @@ describe('Step-Based Lesson Architecture & Micro-Learning Content', () => {
   it('ensures every lesson has a valid step sequence ending with a completion step', () => {
     for (const lesson of LESSONS) {
       assert.ok(
-        lesson.steps.length >= 6 && lesson.steps.length <= 10,
-        `Lesson ${lesson.id} should have 6-10 steps, got ${lesson.steps.length}`,
+        lesson.steps.length >= 6 && lesson.steps.length <= 12,
+        `Lesson ${lesson.id} should have 6-12 steps, got ${lesson.steps.length}`,
       );
       assert.equal(lesson.steps[0]?.type, 'intro');
       assert.equal(lesson.steps[lesson.steps.length - 1]?.type, 'completion');
@@ -145,6 +234,40 @@ describe('Step-Based Lesson Architecture & Micro-Learning Content', () => {
           s.type === 'interactive',
       );
       assert.ok(hasInteractiveOrChoice, `Lesson ${lesson.id} must have interactive/question steps`);
+    }
+  });
+
+  it('separates Altersvorsorgedepot (available-soon), Riester (legacy), and Frühstart-Rente (planned)', () => {
+    const depot = STATE_SUPPORT_PROGRAMS.find((p) => p.id === 'altersvorsorgedepot-2027');
+    const riester = STATE_SUPPORT_PROGRAMS.find((p) => p.id === 'riester');
+    const fruehstart = STATE_SUPPORT_PROGRAMS.find((p) => p.id === 'fruehstart-rente');
+
+    assert.ok(depot);
+    assert.equal(depot.status, 'available-soon');
+    assert.ok(riester);
+    assert.equal(riester.status, 'legacy');
+    assert.ok(fruehstart);
+    assert.equal(fruehstart.status, 'planned');
+
+    for (const prog of STATE_SUPPORT_PROGRAMS) {
+      assert.equal(prog.standNote, 'Rechts- und Informationsstand: November 2026');
+    }
+  });
+
+  it('provides 11 alphabetically sorted providers and 5 anonymized educational examples with sources', () => {
+    assert.equal(ALTERSVORSORGEDEPOT_PROVIDERS.length, 11);
+    const names = ALTERSVORSORGEDEPOT_PROVIDERS.map((p) => p.providerName);
+    const sorted = [...names].sort((a, b) => a.localeCompare(b, 'de'));
+    assert.deepEqual(names, sorted);
+
+    for (const provider of ALTERSVORSORGEDEPOT_PROVIDERS) {
+      assert.equal(provider.informationDate, 'November 2026');
+      assert.ok(provider.sources.length >= 1);
+    }
+
+    assert.equal(ANONYMIZED_PROVIDER_EXAMPLES.length, 5);
+    for (const example of ANONYMIZED_PROVIDER_EXAMPLES) {
+      assert.ok(example.internalSources.length >= 1);
     }
   });
 

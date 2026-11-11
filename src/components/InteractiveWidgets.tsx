@@ -5,13 +5,33 @@
 
 import { useState } from 'react';
 import {
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  Filter,
+  HelpCircle,
+  Info,
+  ShieldCheck,
+} from 'lucide-react';
+import {
+  BASIC_ALLOWANCE_REFERENCE_POINTS,
+  calculateBasicAllowance,
   calculateBudgetSplit,
   calculateCompoundInterest,
+  calculateEffectiveAnnualCostRate,
   calculateInflationPurchasingPower,
+  calculateRetirementProjection,
   formatEuro,
   formatEuroExact,
+  RETIREMENT_RETURN_PRESETS,
 } from '@/lib/calculator';
-import type { InteractiveStepWidget } from '@/lib/lessons';
+import {
+  ALTERSVORSORGEDEPOT_PROVIDERS,
+  ANONYMIZED_PROVIDER_EXAMPLES,
+  type InteractiveStepWidget,
+  STATE_SUPPORT_PROGRAMS,
+  type StateSupportProgram,
+} from '@/lib/lessons';
 
 /**
  * Step-level compact interactive widgets for the LessonPlayer.
@@ -33,8 +53,16 @@ export function LessonStepInteractiveWidget({
       return <SmallAmountsStepWidget />;
     case 'retirement-slider':
       return <RetirementHorizonStepWidget />;
+    case 'allowance-slider':
+      return <AllowanceSliderStepWidget />;
+    case 'retirement-breakdown':
+      return <RetirementBreakdownInteractive compact />;
     case 'state-status-checker':
       return <StateSupportStepWidget />;
+    case 'cost-impact-slider':
+      return <CostImpactStepWidget />;
+    case 'provider-comparison':
+      return <ProviderComparisonWidget />;
     case 'budget-mini':
       return <BudgetMiniStepWidget />;
     default:
@@ -354,56 +382,1156 @@ function RetirementHorizonStepWidget() {
   );
 }
 
-function StateSupportStepWidget() {
-  const [situation, setSituation] = useState<'azubi' | 'schueler'>('azubi');
+/**
+ * Interactive Allowance Slider for Modul 05 Step 4 ('allowance-slider').
+ * Teaches the exact 2026 Altersvorsorgedepot basic allowance (Grundzulage) formula:
+ * - 0.50 € per 1 € up to 360 €/year (max 180 €)
+ * - 0.25 € per 1 € from 361 € to 1,800 €/year (max +360 €)
+ * - Maximum basic allowance: 540 €/year at 1,800 €/year (150 €/month) own contribution.
+ */
+function AllowanceSliderStepWidget() {
+  const [monthlyContribution, setMonthlyContribution] = useState(30);
+  const annualContribution = monthlyContribution * 12;
+  const basicAllowance = calculateBasicAllowance(annualContribution);
+  const totalInvestedPerYear = annualContribution + basicAllowance;
+  const allowanceRatioPercent =
+    annualContribution > 0
+      ? Math.round((basicAllowance / annualContribution) * 100)
+      : 0;
 
   return (
-    <div className="rounded-2xl border border-border bg-secondary/45 p-4 sm:p-5 space-y-3.5">
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          onClick={() => setSituation('azubi')}
-          className={`min-h-[44px] rounded-xl px-3 py-2 text-sm font-bold transition-all ${
-            situation === 'azubi'
-              ? 'bg-primary text-primary-foreground'
-              : 'border border-border bg-card text-foreground hover:bg-secondary'
-          }`}
-        >
-          Aktiv heute (Azubi / Job)
-        </button>
-        <button
-          type="button"
-          onClick={() => setSituation('schueler')}
-          className={`min-h-[44px] rounded-xl px-3 py-2 text-sm font-bold transition-all ${
-            situation === 'schueler'
-              ? 'bg-primary text-primary-foreground'
-              : 'border border-border bg-card text-foreground hover:bg-secondary'
-          }`}
-        >
-          Politisch geplant (noch nicht aktiv)
-        </button>
+    <div
+      data-testid="allowance-slider-widget"
+      className="rounded-2xl border border-border bg-secondary/45 p-4 sm:p-5 space-y-4"
+    >
+      {/* Slider & Reference Quick Buttons */}
+      <div className="space-y-3">
+        <div className="flex items-baseline justify-between gap-2">
+          <label
+            htmlFor="allowance-monthly-range"
+            className="text-sm sm:text-base font-bold text-foreground"
+          >
+            Dein Monatsbeitrag
+          </label>
+          <span
+            data-testid="allowance-monthly-value"
+            className="font-mono text-xl font-extrabold text-primary"
+          >
+            {formatEuro(monthlyContribution)} / Monat
+          </span>
+        </div>
+
+        <input
+          id="allowance-monthly-range"
+          data-testid="allowance-monthly-range"
+          type="range"
+          min={0}
+          max={200}
+          step={5}
+          value={monthlyContribution}
+          onChange={(e) => setMonthlyContribution(Number(e.target.value))}
+          className="w-full"
+        />
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs font-semibold text-muted-foreground mr-1">
+            Stufen testen:
+          </span>
+          {BASIC_ALLOWANCE_REFERENCE_POINTS.map((ref) => {
+            const active = monthlyContribution === ref.monthlyContribution;
+            return (
+              <button
+                key={ref.monthlyContribution}
+                type="button"
+                data-testid={`allowance-preset-${ref.monthlyContribution}`}
+                onClick={() => setMonthlyContribution(ref.monthlyContribution)}
+                className={`min-h-[36px] rounded-xl px-2.5 py-1 font-mono text-xs font-bold transition-all ${
+                  active
+                    ? 'bg-primary text-primary-foreground shadow-xs'
+                    : 'border border-border bg-card text-foreground hover:bg-secondary'
+                }`}
+              >
+                {ref.monthlyContribution} €
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {situation === 'azubi' ? (
-        <div className="rounded-xl border border-border bg-card p-4 space-y-1.5">
-          <p className="text-sm font-extrabold text-foreground">
-            Heute aktiv nutzbar (Stand: 2025/2026):
+      {/* 4 Key Output Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+        <div className="rounded-xl border border-border bg-card p-3">
+          <p className="text-xs font-semibold text-muted-foreground">
+            Jahresbeitrag
           </p>
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            1. <strong>Vermögenswirksame Leistungen (VL)</strong> vom Arbeitgeber (oft 10–40 € / Monat). 2. Staatliche <strong>Arbeitnehmersparzulage</strong> & <strong>Wohnungsbauprämie</strong>. 3. <strong>Sparer-Pauschbetrag</strong> (1.000 € steuerfrei per Freistellungsauftrag).
+          <p
+            data-testid="allowance-annual-own"
+            className="font-mono text-base sm:text-lg font-extrabold text-foreground mt-0.5"
+          >
+            {formatEuro(annualContribution)}
           </p>
         </div>
-      ) : (
-        <div className="rounded-xl border border-border bg-card p-4 space-y-1.5">
-          <p className="text-sm font-extrabold text-foreground">
-            Bisher nur geplant / in Diskussion (Stand: 2025/2026):
+
+        <div className="rounded-xl border border-primary/30 bg-accent/20 p-3">
+          <p className="text-xs font-semibold text-accent-foreground">
+            Grundzulage
           </p>
+          <p
+            data-testid="allowance-basic-amount"
+            className="font-mono text-base sm:text-lg font-extrabold text-primary mt-0.5"
+          >
+            +{formatEuro(basicAllowance)}
+          </p>
+        </div>
+
+        <div className="rounded-xl bg-primary p-3 text-primary-foreground">
+          <p className="text-xs font-semibold text-primary-foreground/85">
+            Zusammen investiert
+          </p>
+          <p
+            data-testid="allowance-total-invested"
+            className="font-mono text-base sm:text-lg font-extrabold mt-0.5"
+          >
+            {formatEuro(totalInvestedPerYear)}
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-border bg-card p-3">
+          <p className="text-xs font-semibold text-muted-foreground">
+            Förderanteil zum Eigenbeitrag
+          </p>
+          <p
+            data-testid="allowance-ratio-percent"
+            className="font-mono text-base sm:text-lg font-extrabold text-primary mt-0.5"
+          >
+            {allowanceRatioPercent} %
+          </p>
+        </div>
+      </div>
+
+      {annualContribution > 1800 && (
+        <p className="rounded-xl border border-border bg-card px-3.5 py-2.5 text-xs font-semibold text-muted-foreground">
+          Hinweis zur Fördergrenze: Ab 1.800 € Eigenbeitrag pro Jahr (150 € / Monat) ist die maximale Grundzulage von 540 € pro Jahr erreicht. Höhere Eigenbeiträge werden mitinvestiert, erhöhen die Grundzulage aber nicht weiter.
+        </p>
+      )}
+
+      {/* 6 Reference Points Overview */}
+      <div className="rounded-xl border border-border bg-card p-3.5 space-y-2">
+        <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+          Orientierungstabelle: Eigenbeitrag & jährliche Grundzulage
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+          {BASIC_ALLOWANCE_REFERENCE_POINTS.map((ref) => {
+            const isCurrent = monthlyContribution === ref.monthlyContribution;
+            return (
+              <div
+                key={ref.monthlyContribution}
+                className={`rounded-lg border px-2.5 py-2 ${
+                  isCurrent
+                    ? 'border-primary bg-accent/20 font-bold'
+                    : 'border-border bg-secondary/35'
+                }`}
+              >
+                <p className="font-mono text-foreground">
+                  {ref.monthlyContribution} €/Monat ({ref.annualContribution} €/J.)
+                </p>
+                <p className="font-mono text-primary mt-0.5">
+                  +{ref.basicAllowance} € Zulage → {ref.totalInvestedPerYear} €
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Required Pedagogical Note */}
+      <p className="rounded-xl border border-primary/25 bg-accent/15 px-3.5 py-2.5 text-sm font-semibold text-foreground leading-snug">
+        Die Zulage steigt mit deinem Eigenbeitrag. Wie viel du selbst einzahlst, muss aber zu deinem Budget und deiner langfristigen Planung passen.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Interactive Retirement Breakdown Widget used in Modul 05 Step 6 AND as the 3rd tab on /rechner.
+ * Separates Own Contributions, Basic Allowances, Child Allowances, Career Starter Bonus,
+ * Potential Market Growth, and Estimated Costs cleanly.
+ */
+export function RetirementBreakdownInteractive({
+  compact = false,
+}: {
+  compact?: boolean;
+}) {
+  const [startAge, setStartAge] = useState(18);
+  const [retirementAge, setRetirementAge] = useState(67);
+  const [monthlyContribution, setMonthlyContribution] = useState(50);
+  const [annualReturnPercent, setAnnualReturnPercent] = useState(5);
+  const [annualCostPercent, setAnnualCostPercent] = useState(0.35);
+  const [eligibleChildrenCount, setEligibleChildrenCount] = useState(0);
+  const [includeCareerStarterBonus, setIncludeCareerStarterBonus] = useState(true);
+  const [showFullLegalNotice, setShowFullLegalNotice] = useState(false);
+
+  const isUnder25 = startAge < 25;
+
+  const projection = calculateRetirementProjection({
+    startAge,
+    retirementAge,
+    monthlyContribution,
+    assumedGrossAnnualReturnPercent: annualReturnPercent,
+    estimatedAnnualCostPercent: annualCostPercent,
+    eligibleChildren: eligibleChildrenCount,
+    careerStarterBonusEligible: isUnder25 && includeCareerStarterBonus,
+  });
+
+  return (
+    <div
+      data-testid="retirement-breakdown-widget"
+      className={
+        compact
+          ? 'rounded-2xl border border-border bg-secondary/45 p-4 sm:p-5 space-y-5'
+          : 'surface-card p-6 sm:p-7 space-y-6'
+      }
+    >
+      {!compact && (
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center rounded-lg bg-accent/25 px-2.5 py-1 text-xs font-bold text-accent-foreground">
+              Altersvorsorgedepot-Modellrechner (ab 2027)
+            </span>
+            <span className="inline-flex items-center rounded-lg border border-border bg-secondary px-2.5 py-1 text-xs font-semibold text-muted-foreground">
+              Rechts- und Informationsstand: November 2026
+            </span>
+          </div>
+          <h2 className="text-2xl font-extrabold text-foreground">
+            Eigenbeitrag, staatliche Zulagen, Rendite & Kosten getrennt prüfen
+          </h2>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            Konzepte wie das <strong>Altersvorsorgedepot</strong> oder die <strong>Frühstart-Rente</strong> sind politische Vorhaben und noch NICHT als Gesetz beschlossen.
+            Die gesetzliche Grundlage wurde 2026 beschlossen. Zertifizierte Produkte sollen ab dem 1. Januar 2027 angeboten werden. Konkrete Anbieterbedingungen können sich bis zur endgültigen Zertifizierung und Veröffentlichung der Produktunterlagen noch ändern.
           </p>
         </div>
       )}
+
+      {/* Return Presets (vorsichtig 2 %, mittel 5 %, chancenorientiert 7 %) */}
+      <div className="space-y-2">
+        <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">
+          Rendite-Szenario wählen (unverbindliche Modellannahme vor Kosten):
+        </span>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {RETIREMENT_RETURN_PRESETS.map((preset) => {
+            const active = annualReturnPercent === preset.ratePercent;
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                data-testid={`retirement-preset-${preset.id}`}
+                onClick={() => setAnnualReturnPercent(preset.ratePercent)}
+                className={`rounded-xl border p-3 text-left transition-all ${
+                  active
+                    ? 'border-primary bg-primary text-primary-foreground shadow-xs'
+                    : 'border-border bg-card text-foreground hover:bg-secondary'
+                }`}
+              >
+                <p className="text-xs sm:text-sm font-extrabold">{preset.label}</p>
+                <p
+                  className={`text-[11px] mt-0.5 ${
+                    active ? 'text-primary-foreground/85' : 'text-muted-foreground'
+                  }`}
+                >
+                  {preset.description}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Controls Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Monthly contribution */}
+        <div className="rounded-xl border border-border bg-card p-3.5 space-y-2">
+          <div className="flex items-baseline justify-between">
+            <label
+              htmlFor="ret-monthly-range"
+              className="text-sm font-bold text-foreground"
+            >
+              Monatlicher Eigenbeitrag
+            </label>
+            <span className="font-mono text-base font-extrabold text-primary">
+              {formatEuro(monthlyContribution)}
+            </span>
+          </div>
+          <input
+            id="ret-monthly-range"
+            data-testid="ret-monthly-range"
+            type="range"
+            min={0}
+            max={250}
+            step={5}
+            value={monthlyContribution}
+            onChange={(e) => setMonthlyContribution(Number(e.target.value))}
+            className="w-full"
+          />
+          <p className="text-xs text-muted-foreground">
+            Jahresbeitrag: <strong className="font-mono">{formatEuro(projection.annualPersonalContribution)}</strong> → Grundzulage:{' '}
+            <strong className="font-mono text-primary">+{formatEuro(projection.annualBasicAllowance)}/J.</strong>
+          </p>
+        </div>
+
+        {/* Start Age & Retirement Age */}
+        <div className="rounded-xl border border-border bg-card p-3.5 space-y-2">
+          <div className="flex items-baseline justify-between">
+            <label
+              htmlFor="ret-start-age-range"
+              className="text-sm font-bold text-foreground"
+            >
+              Startalter (bis Rentenbeginn {retirementAge} J.)
+            </label>
+            <span className="font-mono text-base font-extrabold text-primary">
+              {startAge} J. ({projection.years} J. Laufzeit)
+            </span>
+          </div>
+          <input
+            id="ret-start-age-range"
+            data-testid="ret-start-age-range"
+            type="range"
+            min={16}
+            max={60}
+            step={1}
+            value={startAge}
+            onChange={(e) => setStartAge(Number(e.target.value))}
+            className="w-full"
+          />
+          <div className="flex items-center justify-between text-xs text-muted-foreground pt-0.5">
+            <label htmlFor="ret-end-age-select" className="font-semibold">
+              Geplanter Rentenbeginn:
+            </label>
+            <select
+              id="ret-end-age-select"
+              value={retirementAge}
+              onChange={(e) => setRetirementAge(Number(e.target.value))}
+              className="rounded-lg border border-border bg-secondary px-2 py-0.5 font-mono text-xs font-bold text-foreground"
+            >
+              <option value={65}>65 Jahre</option>
+              <option value={67}>67 Jahre (Regelgrenze)</option>
+              <option value={68}>68 Jahre</option>
+              <option value={70}>70 Jahre</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Gross return & Annual cost */}
+        <div className="rounded-xl border border-border bg-card p-3.5 space-y-2">
+          <div className="flex items-baseline justify-between">
+            <label
+              htmlFor="ret-cost-range"
+              className="text-sm font-bold text-foreground"
+            >
+              Geschätzte Kosten p. a. (ETF + Depot)
+            </label>
+            <span className="font-mono text-base font-extrabold text-foreground">
+              {annualCostPercent.toLocaleString('de-DE', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}{' '}
+              %
+            </span>
+          </div>
+          <input
+            id="ret-cost-range"
+            data-testid="ret-cost-range"
+            type="range"
+            min={0}
+            max={2}
+            step={0.05}
+            value={annualCostPercent}
+            onChange={(e) => setAnnualCostPercent(Number(e.target.value))}
+            className="w-full"
+          />
+          <p className="text-xs text-muted-foreground">
+            Referenzwert Standarddepot: max. 1,50 % Effektivkosten (günstige ETF-Lösungen oft 0,10–0,50 % p. a.)
+          </p>
+        </div>
+
+        {/* Children & Career Starter Bonus */}
+        <div className="rounded-xl border border-border bg-card p-3.5 space-y-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <label
+              htmlFor="ret-children-select"
+              className="text-sm font-bold text-foreground"
+            >
+              Förderberechtigte Kinder
+            </label>
+            <select
+              id="ret-children-select"
+              data-testid="ret-children-select"
+              value={eligibleChildrenCount}
+              onChange={(e) => setEligibleChildrenCount(Number(e.target.value))}
+              className="rounded-lg border border-border bg-secondary px-2.5 py-1 font-mono text-xs font-bold text-foreground"
+            >
+              <option value={0}>0 Kinder</option>
+              <option value={1}>1 Kind (+{formatEuro(projection.annualChildAllowance)}/J.)</option>
+              <option value={2}>2 Kinder</option>
+              <option value={3}>3 Kinder</option>
+            </select>
+          </div>
+
+          <div className="flex items-center justify-between gap-2 pt-1 border-t border-border">
+            <label
+              htmlFor="ret-starter-bonus-check"
+              className="text-xs font-semibold text-foreground"
+            >
+              Berufseinsteigerbonus (einmalig 200 € unter 25 J.)
+            </label>
+            <input
+              id="ret-starter-bonus-check"
+              type="checkbox"
+              checked={isUnder25 && includeCareerStarterBonus}
+              disabled={!isUnder25}
+              onChange={(e) => setIncludeCareerStarterBonus(e.target.checked)}
+              className="h-4 w-4 accent-primary"
+            />
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            {isUnder25
+              ? 'Aktiv: Startalter liegt vor dem 25. Geburtstag (+200 € einmalig im 1. Jahr).'
+              : 'Nicht aktiv: Ab 25 Jahren entfällt der einmalige Berufseinsteigerbonus.'}
+          </p>
+        </div>
+      </div>
+
+      {/* Separate Component Breakdown (Visual Hierarchy) */}
+      <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-primary">
+              Aufschlüsselung zum Rentenbeginn ({projection.years} Jahre)
+            </p>
+            <h3 className="text-lg font-extrabold text-foreground">
+              Woraus sich der Modellwert zusammensetzt
+            </h3>
+          </div>
+          <div className="text-right">
+            <span className="text-xs font-semibold text-muted-foreground block">
+              Modellwert vor Steuern
+            </span>
+            <span
+              data-testid="ret-final-value"
+              className="font-mono text-2xl font-extrabold text-primary"
+            >
+              {formatEuro(projection.projectedValueBeforeTax)}
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+          <div className="rounded-xl border border-border bg-secondary/40 p-3">
+            <p className="text-xs font-semibold text-muted-foreground">
+              Eigene Einzahlungen
+            </p>
+            <p
+              data-testid="ret-own-contributions"
+              className="font-mono text-base font-extrabold text-foreground mt-0.5"
+            >
+              {formatEuro(projection.personalContributions)}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-primary/25 bg-accent/20 p-3">
+            <p className="text-xs font-semibold text-accent-foreground">
+              Grundzulagen
+            </p>
+            <p
+              data-testid="ret-basic-allowances"
+              className="font-mono text-base font-extrabold text-primary mt-0.5"
+            >
+              +{formatEuro(projection.basicAllowances)}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-primary/25 bg-accent/20 p-3">
+            <p className="text-xs font-semibold text-accent-foreground">
+              Kinderzulagen
+            </p>
+            <p
+              data-testid="ret-child-allowances"
+              className="font-mono text-base font-extrabold text-primary mt-0.5"
+            >
+              +{formatEuro(projection.childAllowances)}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-primary/25 bg-accent/20 p-3">
+            <p className="text-xs font-semibold text-accent-foreground">
+              Berufseinsteigerbonus
+            </p>
+            <p
+              data-testid="ret-starter-bonus"
+              className="font-mono text-base font-extrabold text-primary mt-0.5"
+            >
+              +{formatEuro(projection.careerStarterBonus)}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-border bg-secondary/40 p-3">
+            <p className="text-xs font-semibold text-muted-foreground">
+              Mögliche Wertentwicklung
+            </p>
+            <p
+              data-testid="ret-investment-growth"
+              className="font-mono text-base font-extrabold text-foreground mt-0.5"
+            >
+              +{formatEuro(projection.assumedMarketGrowth)}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-warning/40 bg-warning/10 p-3">
+            <p className="text-xs font-semibold text-foreground">
+              Geschätzte Kosten
+            </p>
+            <p
+              data-testid="ret-estimated-costs"
+              className="font-mono text-base font-extrabold text-foreground mt-0.5"
+            >
+              −{formatEuro(projection.estimatedCosts)}
+            </p>
+          </div>
+        </div>
+
+        {/* Short Mandatory Model Notice directly below the result */}
+        <div className="rounded-xl border border-border bg-secondary/35 px-3.5 py-2.5 space-y-2">
+          <p
+            data-testid="ret-short-disclaimer"
+            className="text-xs sm:text-sm font-semibold text-foreground"
+          >
+            Modellrechnung, keine garantierte Rendite. Der tatsächliche Wert kann höher oder niedriger ausfallen.
+          </p>
+
+          <button
+            type="button"
+            onClick={() => setShowFullLegalNotice((prev) => !prev)}
+            aria-expanded={showFullLegalNotice}
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline"
+          >
+            <Info className="h-3.5 w-3.5" />
+            <span>
+              {showFullLegalNotice
+                ? 'Rechtlichen Bildungshinweis ausblenden'
+                : 'Rechtlicher Bildungshinweis & Modellannahmen'}
+            </span>
+          </button>
+
+          {showFullLegalNotice && (
+            <p className="text-xs text-muted-foreground leading-relaxed pt-1 border-t border-border">
+              Diese Inhalte dienen ausschließlich der Finanzbildung und stellen keine Anlage-, Steuer- oder Rechtsberatung dar. Modellrechnungen beruhen auf Annahmen. Renditen, Kosten, Steuern und gesetzliche Regeln können sich verändern. Auszahlungen aus einem geförderten Altersvorsorgedepot im Rentenalter unterliegen nachgelagert der individuellen Einkommensteuer.
+            </p>
+          )}
+        </div>
+      </div>
     </div>
+  );
+}
+
+/**
+ * Updated State Support Status Checker ('state-status-checker').
+ * Separates active programs (VL, Arbeitnehmersparzulage, Wohnungsbauprämie),
+ * adopted 2027 Altersvorsorgedepot ('available-soon'), legacy Riester ('legacy'),
+ * and planned Frühstart-Rente ('planned') with Stand: November 2026.
+ */
+function StateSupportStepWidget() {
+  const [filterStatus, setFilterStatus] = useState<
+    'all' | StateSupportProgram['status']
+  >('all');
+
+  const filteredPrograms =
+    filterStatus === 'all'
+      ? STATE_SUPPORT_PROGRAMS
+      : STATE_SUPPORT_PROGRAMS.filter((p) => p.status === filterStatus);
+
+  return (
+    <div
+      data-testid="state-status-checker-widget"
+      className="rounded-2xl border border-border bg-secondary/45 p-4 sm:p-5 space-y-4"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+          Programme nach Rechtsstatus filtern (Stand: November 2026):
+        </span>
+        <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Förderstatus filtern">
+          {(
+            [
+              { id: 'all', label: 'Alle (6)' },
+              { id: 'active', label: 'Aktiv heute' },
+              { id: 'available-soon', label: 'Ab 01.01.2027' },
+              { id: 'legacy', label: 'Altverträge' },
+              { id: 'planned', label: 'Geplant' },
+            ] as const
+          ).map((tab) => {
+            const active = filterStatus === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                data-testid={`state-filter-${tab.id}`}
+                onClick={() => setFilterStatus(tab.id)}
+                className={`min-h-[36px] rounded-xl px-3 py-1 text-xs font-bold transition-all ${
+                  active
+                    ? 'bg-primary text-primary-foreground shadow-xs'
+                    : 'border border-border bg-card text-foreground hover:bg-secondary'
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {filteredPrograms.map((program) => {
+          const badgeStyle =
+            program.status === 'active'
+              ? 'bg-accent/30 text-accent-foreground border-primary/30'
+              : program.status === 'available-soon'
+                ? 'bg-primary text-primary-foreground border-primary'
+                : program.status === 'legacy'
+                  ? 'bg-secondary text-secondary-foreground border-border'
+                  : 'bg-warning/20 text-foreground border-warning/50';
+
+          return (
+            <div
+              key={program.id}
+              data-testid={`state-program-${program.id}`}
+              className="rounded-xl border border-border bg-card p-4 space-y-2.5"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-base font-extrabold text-foreground">
+                  {program.name}
+                </p>
+                <span
+                  className={`rounded-lg border px-2.5 py-0.5 text-xs font-bold ${badgeStyle}`}
+                >
+                  {program.statusBadgeText}
+                </span>
+              </div>
+
+              <p className="text-sm text-foreground/90 leading-relaxed">
+                {program.summary}
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <div className="rounded-lg bg-secondary/50 p-2.5 space-y-1">
+                  <span className="font-bold text-foreground block">
+                    Für wen & wie funktioniert es?
+                  </span>
+                  <p className="text-muted-foreground">{program.whoIsItFor}</p>
+                  <ul className="space-y-1 text-muted-foreground pt-1">
+                    {program.howItWorks.map((item, idx) => (
+                      <li key={idx} className="flex items-start gap-1.5">
+                        <span className="text-primary font-bold">•</span>
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="rounded-lg bg-secondary/50 p-2.5 space-y-1">
+                  <span className="font-bold text-foreground block">
+                    Wichtige Bedingungen & Quelle:
+                  </span>
+                  <p className="text-muted-foreground leading-relaxed">
+                    {program.importantConditions}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground/80 pt-1">
+                    Prüf-Orientierung: {program.verificationSource}
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-[11px] font-semibold text-muted-foreground">
+                {program.standNote}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 4 Verification Questions Box */}
+      <div className="rounded-xl border border-primary/25 bg-accent/15 p-3.5 space-y-1.5">
+        <p className="text-xs font-bold uppercase tracking-wider text-primary">
+          Deine 4 Prüf-Fragen vor jedem Fördervertrag:
+        </p>
+        <ol className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs sm:text-sm font-semibold text-foreground list-decimal list-inside">
+          <li>Bin ich förderberechtigt?</li>
+          <li>Wie viel muss ich selbst einzahlen?</li>
+          <li>Welche Kosten und Bindungsfristen gelten?</li>
+          <li>Wann und wie kann ich über das Geld verfügen?</li>
+        </ol>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Interactive Cost-Impact & Anonymized Real-Provider Learning Examples ('cost-impact-slider').
+ * Teaches fixed vs percentage fees on small balances and walks through all 5 anonymized examples.
+ */
+function CostImpactStepWidget() {
+  const [balanceEur, setBalanceEur] = useState(2000);
+  const [selectedExampleIndex, setSelectedExampleIndex] = useState(0);
+
+  // Angebot A: 1 €/month (12 €/year) fixed fee + 0.35% p.a. product cost
+  const costBreakdownA = calculateEffectiveAnnualCostRate(balanceEur, 12, 0.35);
+
+  // Angebot B: 0 € depot fee + 0.10% p.a. product cost
+  const costBreakdownB = calculateEffectiveAnnualCostRate(balanceEur, 0, 0.1);
+
+  const activeExample =
+    ANONYMIZED_PROVIDER_EXAMPLES[selectedExampleIndex] ??
+    ANONYMIZED_PROVIDER_EXAMPLES[0]!;
+
+  return (
+    <div
+      data-testid="cost-impact-widget"
+      className="rounded-2xl border border-border bg-secondary/45 p-4 sm:p-5 space-y-5"
+    >
+      {/* Part 1: Interactive Small-Pot Fee Calculator */}
+      <div className="rounded-xl border border-border bg-card p-4 space-y-3.5">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <label
+            htmlFor="cost-balance-range"
+            className="text-sm sm:text-base font-bold text-foreground"
+          >
+            Depotwert im Aufbau testen
+          </label>
+          <span
+            data-testid="cost-balance-value"
+            className="font-mono text-xl font-extrabold text-primary"
+          >
+            {formatEuro(balanceEur)}
+          </span>
+        </div>
+
+        <input
+          id="cost-balance-range"
+          data-testid="cost-balance-range"
+          type="range"
+          min={500}
+          max={20000}
+          step={500}
+          value={balanceEur}
+          onChange={(e) => setBalanceEur(Number(e.target.value))}
+          className="w-full"
+        />
+
+        <div className="flex flex-wrap gap-1.5">
+          {[1000, 2000, 5000, 10000].map((val) => (
+            <button
+              key={val}
+              type="button"
+              onClick={() => setBalanceEur(val)}
+              className={`rounded-lg px-2.5 py-1 font-mono text-xs font-bold transition-all ${
+                balanceEur === val
+                  ? 'bg-primary text-primary-foreground'
+                  : 'border border-border bg-secondary/60 text-foreground hover:bg-secondary'
+              }`}
+            >
+              {formatEuro(val)}
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          <div className="rounded-xl border border-warning/40 bg-warning/10 p-3.5 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-foreground">
+                Angebot A (Fixgebühr + ETF)
+              </span>
+              <span className="font-mono text-xs font-bold text-foreground">
+                12 €/J. + 0,35 %
+              </span>
+            </div>
+            <p
+              data-testid="cost-rate-angebot-a"
+              className="font-mono text-lg font-extrabold text-foreground"
+            >
+              {costBreakdownA.totalEffectiveCostPercent.toLocaleString('de-DE', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}{' '}
+              % p. a. ({formatEuroExact(costBreakdownA.totalAnnualCostEur)}/J.)
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Allein die 12 € Fixgebühr wirken bei {formatEuro(balanceEur)} wie{' '}
+              <strong className="font-mono">
+                {costBreakdownA.fixedFeePercentOfPortfolio.toLocaleString('de-DE', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}{' '}
+                % p. a.
+              </strong>
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-primary/30 bg-accent/20 p-3.5 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-accent-foreground">
+                Angebot B (0 € Depot + ETF)
+              </span>
+              <span className="font-mono text-xs font-bold text-primary">
+                0 €/J. + 0,10 %
+              </span>
+            </div>
+            <p
+              data-testid="cost-rate-angebot-b"
+              className="font-mono text-lg font-extrabold text-primary"
+            >
+              {costBreakdownB.totalEffectiveCostPercent.toLocaleString('de-DE', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}{' '}
+              % p. a. ({formatEuroExact(costBreakdownB.totalAnnualCostEur)}/J.)
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Keine fixe Grundgebühr – die prozentuale Belastung bleibt auch bei kleinem Startdepot konstant niedrig.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Part 2: 5 Anonymized Real-Provider Learning Examples */}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            5 anonymisierte Praxis-Vergleiche (Angebot A vs. Angebot B):
+          </p>
+          <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Praxis-Beispiele auswählen">
+            {ANONYMIZED_PROVIDER_EXAMPLES.map((ex, idx) => {
+              const active = idx === selectedExampleIndex;
+              return (
+                <button
+                  key={ex.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  data-testid={`anon-example-tab-${idx + 1}`}
+                  onClick={() => setSelectedExampleIndex(idx)}
+                  className={`min-h-[34px] rounded-xl px-2.5 py-1 text-xs font-bold transition-all ${
+                    active
+                      ? 'bg-primary text-primary-foreground shadow-xs'
+                      : 'border border-border bg-card text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  Beispiel {idx + 1}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div
+          data-testid="anon-example-card"
+          className="rounded-xl border border-border bg-card p-4 space-y-3"
+        >
+          <div>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-primary">
+              {activeExample.kicker}
+            </span>
+            <p className="text-base font-extrabold text-foreground mt-0.5">
+              {activeExample.title}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+            <div className="rounded-lg border border-border bg-secondary/45 p-3 space-y-1.5">
+              <span className="font-bold text-foreground block">
+                {activeExample.offerALabel}
+              </span>
+              <ul className="space-y-1 text-muted-foreground leading-relaxed">
+                {activeExample.offerASummary.map((pt, i) => (
+                  <li key={i} className="flex items-start gap-1.5">
+                    <span className="text-primary font-bold">•</span>
+                    <span>{pt}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-lg border border-primary/25 bg-accent/15 p-3 space-y-1.5">
+              <span className="font-bold text-foreground block">
+                {activeExample.offerBLabel}
+              </span>
+              <ul className="space-y-1 text-muted-foreground leading-relaxed">
+                {activeExample.offerBSummary.map((pt, i) => (
+                  <li key={i} className="flex items-start gap-1.5">
+                    <span className="text-primary font-bold">•</span>
+                    <span>{pt}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          <div className="rounded-lg bg-secondary/35 p-3 text-xs space-y-1.5">
+            <p className="text-foreground">
+              <strong>Prüf-Frage:</strong> {activeExample.question}
+            </p>
+            <p className="text-muted-foreground">
+              <strong className="text-foreground">Worauf es ankommt:</strong>{' '}
+              {activeExample.expectedConcept}
+            </p>
+            <p className="text-primary font-bold">
+              Merksatz: {activeExample.takeaway}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type ProviderFilterId =
+  | 'all'
+  | 'standard'
+  | 'free-choice'
+  | 'guarantee'
+  | 'published-costs'
+  | 'costs-pending';
+
+/**
+ * Full Neutral 11-Provider Comparison Widget ('provider-comparison').
+ * Sorted strictly alphabetically, objective filters, no winner rankings,
+ * clear distinction between confirmed facts, preliminary announcements, and missing final pricing.
+ */
+export function ProviderComparisonWidget() {
+  const [activeFilter, setActiveFilter] = useState<ProviderFilterId>('all');
+  const [expandedProviderId, setExpandedProviderId] = useState<string | null>(null);
+
+  const filteredProviders = ALTERSVORSORGEDEPOT_PROVIDERS.filter((provider) => {
+    switch (activeFilter) {
+      case 'standard':
+        return provider.hasStandardProduct;
+      case 'free-choice':
+        return provider.hasFreeChoice;
+      case 'guarantee':
+        return provider.hasGuarantee;
+      case 'published-costs':
+        return provider.hasPublishedCosts;
+      case 'costs-pending':
+        return provider.hasMissingFinalPricing;
+      case 'all':
+      default:
+        return true;
+    }
+  });
+
+  const filters: { id: ProviderFilterId; label: string }[] = [
+    { id: 'all', label: `Alle (${ALTERSVORSORGEDEPOT_PROVIDERS.length})` },
+    { id: 'standard', label: 'Standardprodukt' },
+    { id: 'free-choice', label: 'Freie Auswahl' },
+    { id: 'guarantee', label: 'Garantie' },
+    { id: 'published-costs', label: 'Veröffentlichte Kosten' },
+    { id: 'costs-pending', label: 'Kosten noch nicht vollständig veröffentlicht' },
+  ];
+
+  return (
+    <section
+      data-testid="provider-comparison-widget"
+      aria-label="Anbieterübersicht zum Altersvorsorgedepot"
+      className="rounded-2xl border border-border bg-secondary/45 p-4 sm:p-5 space-y-4"
+    >
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-lg sm:text-xl font-extrabold text-foreground">
+            Anbieterübersicht zum Altersvorsorgedepot
+          </h3>
+          <span className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-bold text-muted-foreground">
+            <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+            <span>Alphabetisch sortiert · Stand: November 2026</span>
+          </span>
+        </div>
+
+        <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
+          Diese Übersicht zeigt veröffentlichte Anbieterinformationen mit Stand November 2026. Sie ist keine Empfehlung und ersetzt keine Prüfung der späteren Produktinformationsblätter, Effektivkostenquoten sowie Preis- und Leistungsverzeichnisse. Bedingungen können sich bis zur Zertifizierung und Markteinführung ändern.
+        </p>
+      </div>
+
+      {/* Objective Filters */}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+          <Filter className="h-3.5 w-3.5 text-primary" />
+          <span>Sachlich filtern ({filteredProviders.length} Treffer):</span>
+        </div>
+        <div
+          role="tablist"
+          aria-label="Anbieter nach objektiven Merkmalen filtern"
+          className="flex flex-wrap gap-1.5"
+        >
+          {filters.map((f) => {
+            const active = activeFilter === f.id;
+            return (
+              <button
+                key={f.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                data-testid={`provider-filter-${f.id}`}
+                onClick={() => setActiveFilter(f.id)}
+                className={`min-h-[36px] rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
+                  active
+                    ? 'bg-primary text-primary-foreground shadow-xs'
+                    : 'border border-border bg-card text-foreground hover:bg-secondary'
+                }`}
+              >
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Provider Cards (Alphabetical, Responsive on Mobile & Desktop) */}
+      <div className="space-y-3">
+        {filteredProviders.map((provider) => {
+          const isExpanded = expandedProviderId === provider.id;
+          const officialSources = provider.sources.filter((s) => s.isOfficial);
+          const secondarySources = provider.sources.filter((s) => !s.isOfficial);
+          const orderedSources = [...officialSources, ...secondarySources];
+
+          return (
+            <article
+              key={provider.id}
+              data-testid={`provider-card-${provider.id}`}
+              className="rounded-xl border border-border bg-card p-4 space-y-3"
+            >
+              {/* Card Header: Name, Access Note, Info Status Badge, Stand */}
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="text-base sm:text-lg font-extrabold text-foreground">
+                      {provider.providerName}
+                    </h4>
+                    <span className="rounded-md bg-secondary px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+                      {provider.accessNote}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span
+                    className={`rounded-lg border px-2.5 py-0.5 text-xs font-bold ${
+                      provider.hasPublishedCosts
+                        ? 'border-primary/35 bg-accent/20 text-accent-foreground'
+                        : 'border-border bg-secondary text-secondary-foreground'
+                    }`}
+                  >
+                    {provider.hasPublishedCosts
+                      ? 'Konkrete Kostenangaben veröffentlicht'
+                      : 'Finale Gesamtkosten noch offen'}
+                  </span>
+                  <span className="rounded-lg border border-border bg-secondary/40 px-2 py-0.5 font-mono text-[11px] font-semibold text-muted-foreground">
+                    Stand: {provider.informationDate}
+                  </span>
+                </div>
+              </div>
+
+              {/* 4 Core Comparison Columns */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
+                <div className="rounded-lg bg-secondary/45 p-2.5 space-y-1">
+                  <span className="font-bold text-foreground block">
+                    Einfachster bestätigter Einstieg
+                  </span>
+                  <p className="text-muted-foreground leading-relaxed">
+                    {provider.simplestConfirmedEntry}
+                  </p>
+                </div>
+
+                <div className="rounded-lg bg-secondary/45 p-2.5 space-y-1">
+                  <span className="font-bold text-foreground block">
+                    Freie Auswahl
+                  </span>
+                  <p className="text-muted-foreground leading-relaxed">
+                    {provider.freeChoice}
+                  </p>
+                </div>
+
+                <div className="rounded-lg bg-secondary/45 p-2.5 space-y-1">
+                  <span className="font-bold text-foreground block">
+                    Garantie (80 % / 100 %)
+                  </span>
+                  <p className="text-muted-foreground leading-relaxed">
+                    {provider.guarantee}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-warning/35 bg-warning/10 p-2.5 space-y-1">
+                  <span className="font-bold text-foreground block">
+                    Wichtige Einschränkung
+                  </span>
+                  <p className="text-muted-foreground leading-relaxed">
+                    {provider.importantLimitation}
+                  </p>
+                </div>
+              </div>
+
+              {/* Expandable Details & Sources */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setExpandedProviderId(isExpanded ? null : provider.id)
+                  }
+                  aria-expanded={isExpanded}
+                  data-testid={`provider-details-toggle-${provider.id}`}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline"
+                >
+                  <HelpCircle className="h-3.5 w-3.5" />
+                  <span>
+                    {isExpanded
+                      ? 'Details & Quellen ausblenden'
+                      : `Informationsstand & Quellen (${orderedSources.length})`}
+                  </span>
+                  {isExpanded ? (
+                    <ChevronUp className="h-3.5 w-3.5" />
+                  ) : (
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  )}
+                </button>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {orderedSources.map((src, idx) => (
+                    <a
+                      key={idx}
+                      href={src.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 rounded-lg border border-border bg-secondary/50 px-2.5 py-1 text-[11px] font-semibold text-foreground transition-colors hover:bg-secondary"
+                    >
+                      <span>{src.label}</span>
+                      <ExternalLink className="h-3 w-3 text-primary shrink-0" />
+                    </a>
+                  ))}
+                </div>
+              </div>
+
+              {isExpanded && (
+                <div className="rounded-lg bg-secondary/35 p-3 text-xs text-muted-foreground space-y-1.5 leading-relaxed">
+                  <p>
+                    <strong className="text-foreground">
+                      Einordnung des Informationsstands (Stand: {provider.informationDate}):
+                    </strong>{' '}
+                    {provider.informationStatusText}
+                  </p>
+                  <p>
+                    <strong className="text-foreground">Quellen-Hinweis:</strong>{' '}
+                    Offizielle Anbieterinformationen werden zuerst genannt, ergänzende Fach- und Medienberichte an zweiter Stelle. Maßgeblich sind ab 2027 allein die zertifizierten Produktinformationsblätter.
+                  </p>
+                </div>
+              )}
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
