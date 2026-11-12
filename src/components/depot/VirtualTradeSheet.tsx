@@ -2,6 +2,7 @@ import {
   AlertCircle,
   ArrowLeft,
   ArrowRight,
+  Check,
   CheckCircle2,
   HelpCircle,
   Info,
@@ -11,7 +12,8 @@ import {
   Unlock,
   X,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { prefersReducedMotionEnabled } from './AssetDetailView';
 import { formatEuro, formatPercent } from '@/lib/calculator';
 import {
   type DepotTransaction,
@@ -41,6 +43,21 @@ import type {
   MarketQuote,
 } from '@/lib/market-types';
 import { AppLink } from '@/lib/router';
+
+export function toggleExpandedAssetSymbol(
+  currentExpandedSymbol: string | null,
+  clickedSymbol: string,
+): string | null {
+  const normalizedClicked = clickedSymbol.trim().toUpperCase();
+  if (!normalizedClicked) return currentExpandedSymbol;
+  if (
+    currentExpandedSymbol &&
+    currentExpandedSymbol.trim().toUpperCase() === normalizedClicked
+  ) {
+    return null;
+  }
+  return clickedSymbol.trim();
+}
 
 function getCompactBadgeCode(assetType: InstrumentAssetType): string {
   switch (assetType) {
@@ -82,8 +99,8 @@ export function VirtualBuyFlowView({
   const [instruments, setInstruments] = useState<InstrumentMetadata[]>([]);
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [previewDrawerInstrument, setPreviewDrawerInstrument] =
-    useState<InstrumentMetadata | null>(null);
+  const [expandedSymbol, setExpandedSymbol] = useState<string | null>(null);
+  const inlinePanelRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // Selected instrument & quote state
   const [selectedInstrument, setSelectedInstrument] =
@@ -215,7 +232,7 @@ export function VirtualBuyFlowView({
 
   const handleSelectInstrumentToConfigure = (inst: InstrumentMetadata) => {
     if (!isInstrumentUnlocked(inst.symbol)) return;
-    setPreviewDrawerInstrument(null);
+    setExpandedSymbol(null);
     setSelectedInstrument(inst);
     if (portfolio.cashEur < 500 && portfolio.cashEur > 0) {
       setRawInputValue(String(Math.floor(portfolio.cashEur)));
@@ -223,16 +240,32 @@ export function VirtualBuyFlowView({
     setStep('configure');
   };
 
-  const drawerQuote = previewDrawerInstrument
-    ? catalogueQuotes[previewDrawerInstrument.symbol.toUpperCase()] ??
-      portfolio.lastKnownQuotes[previewDrawerInstrument.symbol.toUpperCase()] ??
-      getDemoQuote(previewDrawerInstrument.symbol)
-    : null;
+  const handleToggleRowExpand = (inst: InstrumentMetadata) => {
+    const nextSymbol = toggleExpandedAssetSymbol(expandedSymbol, inst.symbol);
+    setExpandedSymbol(nextSymbol);
+
+    if (nextSymbol && typeof window !== 'undefined') {
+      window.requestAnimationFrame(() => {
+        const panelEl = inlinePanelRefs.current[inst.symbol];
+        if (!panelEl) return;
+        const rect = panelEl.getBoundingClientRect();
+        const viewportHeight =
+          window.innerHeight || document.documentElement.clientHeight;
+        // Scroll into view only if the expanded panel is clipped below the bottom nav / viewport
+        if (rect.bottom > viewportHeight - 72 || rect.top < 64) {
+          panelEl.scrollIntoView({
+            block: 'nearest',
+            behavior: prefersReducedMotionEnabled() ? 'auto' : 'smooth',
+          });
+        }
+      });
+    }
+  };
 
   return (
     <section
       aria-labelledby="virtual-buy-heading"
-      className="depot-card p-5 sm:p-6 space-y-5"
+      className="depot-card p-4 sm:p-6 space-y-5"
     >
       {/* Top Header */}
       <div className="flex items-center justify-between gap-3 border-b border-[var(--depot-border)] pb-4">
@@ -340,6 +373,9 @@ export function VirtualBuyFlowView({
                   getDemoQuote(inst.symbol);
                 const badgeCode = getCompactBadgeCode(inst.assetType);
                 const unlocked = isInstrumentUnlocked(inst.symbol);
+                const isExpanded =
+                  expandedSymbol?.toUpperCase() === upper;
+                const detailPanelId = `inline-asset-detail-${inst.symbol}`;
                 const eurPrice =
                   rowQuote?.priceEur && rowQuote.priceEur > 0
                     ? rowQuote.priceEur
@@ -348,199 +384,256 @@ export function VirtualBuyFlowView({
                         ? rowQuote.price
                         : roundCurrency(rowQuote.price * usdToEurRate)
                       : 0;
+                const unlockExplanationText =
+                  inst.unlockReasonLabel ??
+                  inst.unlockRequirementText ??
+                  'Freigeschaltet nach Lektion';
 
                 return (
                   <div
                     key={inst.symbol}
-                    data-testid={`instrument-row-${inst.symbol}`}
-                    className={`p-3.5 sm:px-4 flex items-center justify-between gap-3 transition-colors ${
-                      unlocked
-                        ? 'hover:bg-[var(--depot-surface-elevated)]/60'
-                        : 'opacity-75 bg-[var(--depot-bg-secondary)]/40'
+                    data-testid={`instrument-item-${inst.symbol}`}
+                    className={`transition-colors duration-200 motion-reduce:transition-none ${
+                      isExpanded
+                        ? 'bg-[var(--depot-surface-elevated)]/90 border-l-4 border-l-[var(--depot-accent-lime)]'
+                        : unlocked
+                          ? 'hover:bg-[var(--depot-surface-elevated)]/60'
+                          : 'bg-[var(--depot-bg-secondary)]/50'
                     }`}
                   >
-                    <button
-                      type="button"
-                      onClick={() => setPreviewDrawerInstrument(inst)}
-                      className="flex items-center gap-3 min-w-0 flex-1 text-left"
+                    {/* Main Asset Row: Responsive 3-column layout (>=360px) or stacked status row (<360px) */}
+                    <div
+                      data-testid={`instrument-row-${inst.symbol}`}
+                      className="p-3 sm:px-4 grid grid-cols-[36px_minmax(0,1fr)] min-[360px]:grid-cols-[36px_minmax(0,1fr)_auto] items-start gap-2.5 sm:gap-3.5"
                     >
-                      <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--depot-border)] bg-[var(--depot-surface)] font-mono text-[11px] font-bold text-[var(--depot-accent-lime)]">
-                        {badgeCode}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono text-sm font-bold text-[var(--depot-text-primary)]">
-                            {inst.symbol}
-                          </span>
-                          <span className="text-[11px] text-[var(--depot-text-muted)]">
-                            {inst.exchange} · {inst.currency}
-                          </span>
-                          {unlocked ? (
-                            <span className="inline-flex items-center gap-1 rounded-md bg-[var(--depot-accent-lime)]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--depot-accent-lime)]">
-                              <Unlock className="h-3 w-3" aria-hidden="true" />
-                              <span>Freigeschaltet</span>
-                            </span>
-                          ) : (
-                            <span
-                              data-testid={`locked-badge-${inst.symbol}`}
-                              className="inline-flex items-center gap-1 rounded-md border border-[var(--depot-border)] bg-[var(--depot-surface)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--depot-text-muted)]"
-                            >
-                              <Lock className="h-3 w-3" aria-hidden="true" />
-                              <span>{inst.unlockRequirementText}</span>
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-xs font-medium text-[var(--depot-text-secondary)] truncate">
-                          {inst.name}
-                        </div>
-                      </div>
-                    </button>
-
-                    <div className="flex items-center gap-3 shrink-0">
+                      {/* Col 1: Asset Icon Badge */}
                       <button
                         type="button"
-                        onClick={() => setPreviewDrawerInstrument(inst)}
-                        className="text-right"
+                        onClick={() => handleToggleRowExpand(inst)}
+                        aria-label={`${inst.name} (${inst.symbol}) Kurzinfo ${isExpanded ? 'schließen' : 'öffnen'}`}
+                        aria-expanded={isExpanded}
+                        aria-controls={detailPanelId}
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--depot-border)] bg-[var(--depot-surface)] font-mono text-[11px] font-bold text-[var(--depot-accent-lime)] depot-focus mt-0.5"
                       >
-                        <div className="font-mono text-sm font-bold tabular-nums text-[var(--depot-text-primary)]">
-                          {eurPrice > 0 ? formatEuro(eurPrice, 2) : '—'}
-                        </div>
-                        <div className="text-[10px] text-[var(--depot-text-muted)]">
-                          {rowQuote?.isDemo === false
-                            ? `Stand ${formatGermanDateLabel(rowQuote.marketTime ?? rowQuote.timestamp)}`
-                            : 'Demowert'}
-                        </div>
+                        {badgeCode}
                       </button>
 
-                      {unlocked ? (
+                      {/* Col 2: Asset Information + Price & Date Column */}
+                      <div className="min-w-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-3">
                         <button
                           type="button"
-                          data-testid={`select-instrument-${inst.symbol}`}
-                          onClick={() => handleSelectInstrumentToConfigure(inst)}
-                          className="depot-btn-lime min-h-[38px] rounded-xl px-3 py-1.5 text-xs font-bold inline-flex items-center gap-1"
+                          data-testid={`toggle-asset-detail-${inst.symbol}`}
+                          onClick={() => handleToggleRowExpand(inst)}
+                          aria-expanded={isExpanded}
+                          aria-controls={detailPanelId}
+                          className="min-w-0 flex-1 text-left depot-focus rounded-lg"
                         >
-                          <span>Auswählen</span>
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <span className="font-mono text-sm font-bold text-[var(--depot-text-primary)]">
+                              {inst.symbol}
+                            </span>
+                            <span className="text-[11px] text-[var(--depot-text-muted)]">
+                              {inst.exchange} · {inst.currency}
+                            </span>
+                            {unlocked && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-[var(--depot-accent-lime)]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--depot-accent-lime)]">
+                                <Unlock className="h-3 w-3 shrink-0" aria-hidden="true" />
+                                <span>Freigeschaltet</span>
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-0.5 text-xs font-medium text-[var(--depot-text-secondary)] leading-snug break-words">
+                            {inst.name}
+                          </div>
                         </button>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled
-                          data-testid={`select-instrument-${inst.symbol}`}
-                          title={inst.unlockRequirementText}
-                          className="min-h-[38px] rounded-xl border border-[var(--depot-border)] bg-[var(--depot-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--depot-text-muted)] cursor-not-allowed inline-flex items-center gap-1"
+
+                        {/* Dedicated Price & Date Column (separate from asset name and lock status) */}
+                        <div
+                          data-testid={`instrument-price-col-${inst.symbol}`}
+                          className="flex flex-row sm:flex-col items-baseline sm:items-end justify-start sm:justify-center gap-2 sm:gap-0.5 shrink-0 pt-0.5 sm:pt-0"
                         >
-                          <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-                          <span>Gesperrt</span>
-                        </button>
-                      )}
+                          <span
+                            data-testid={`instrument-price-${inst.symbol}`}
+                            className="font-mono text-xs sm:text-sm font-bold tabular-nums text-[var(--depot-text-primary)] whitespace-nowrap"
+                          >
+                            {eurPrice > 0 ? formatEuro(eurPrice, 2) : '—'}
+                          </span>
+                          <span
+                            data-testid={`instrument-date-${inst.symbol}`}
+                            className="text-[10px] text-[var(--depot-text-muted)] whitespace-nowrap"
+                          >
+                            {rowQuote?.isDemo === false
+                              ? `Stand ${formatGermanDateLabel(rowQuote.marketTime ?? rowQuote.timestamp)}`
+                              : 'Demowert'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Col 3 (or full-width 2nd row below 360px): Action / Lock Status Vertical Block */}
+                      <div
+                        data-testid={`instrument-status-col-${inst.symbol}`}
+                        className="col-span-2 min-[360px]:col-span-1 flex flex-col items-stretch min-[360px]:items-end justify-start gap-1 min-[360px]:w-[128px] sm:w-[156px] shrink-0 pt-1 min-[360px]:pt-0 border-t border-[var(--depot-border)]/40 min-[360px]:border-t-0"
+                      >
+                        {unlocked ? (
+                          <button
+                            type="button"
+                            data-testid={`select-instrument-${inst.symbol}`}
+                            aria-expanded={isExpanded}
+                            aria-controls={detailPanelId}
+                            onClick={() => handleToggleRowExpand(inst)}
+                            className={`min-h-[36px] rounded-xl px-3 py-1.5 text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-colors depot-focus whitespace-nowrap ${
+                              isExpanded
+                                ? 'border border-[var(--depot-accent-lime)] bg-[var(--depot-accent-lime)]/20 text-[var(--depot-accent-lime)]'
+                                : 'depot-btn-lime'
+                            }`}
+                          >
+                            {isExpanded && (
+                              <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                            )}
+                            <span>{isExpanded ? 'Ausgewählt' : 'Auswählen'}</span>
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              disabled
+                              data-testid={`select-instrument-${inst.symbol}`}
+                              className="min-h-[34px] rounded-xl border border-[var(--depot-border)] bg-[var(--depot-surface)] px-2.5 py-1 text-xs font-semibold text-[var(--depot-text-muted)] cursor-not-allowed inline-flex items-center justify-center gap-1 whitespace-nowrap"
+                            >
+                              <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                              <span>Gesperrt</span>
+                            </button>
+                            <div
+                              data-testid={`locked-badge-${inst.symbol}`}
+                              className="text-[10px] sm:text-[11px] leading-snug text-[var(--depot-text-muted)] text-left min-[360px]:text-right break-words"
+                            >
+                              {unlockExplanationText}
+                            </div>
+                          </>
+                        )}
+                      </div>
                     </div>
+
+                    {/* Inline Expandable Asset Detail Panel directly below the selected row */}
+                    {isExpanded && (
+                      <div
+                        id={detailPanelId}
+                        ref={(el) => {
+                          inlinePanelRefs.current[inst.symbol] = el;
+                        }}
+                        role="region"
+                        aria-label={`Details zu ${inst.name}`}
+                        data-testid={`inline-asset-detail-${inst.symbol}`}
+                        className="border-t border-[var(--depot-border)] bg-[var(--depot-surface)] px-3.5 py-3.5 sm:px-5 sm:py-4 space-y-3 transition-all duration-200 ease-out motion-reduce:transition-none"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="space-y-0.5 min-w-0">
+                            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--depot-text-secondary)]">
+                              <span className="font-mono font-bold text-[var(--depot-accent-lime)]">
+                                {inst.symbol}
+                              </span>
+                              <span aria-hidden="true">·</span>
+                              <span>{inst.assetType}</span>
+                              <span aria-hidden="true">·</span>
+                              <span>
+                                {inst.exchange} · {inst.currency}
+                              </span>
+                              <span aria-hidden="true">·</span>
+                              <span>Risiko: {inst.riskCategory}</span>
+                            </div>
+                            <h3 className="text-sm sm:text-base font-bold text-[var(--depot-text-primary)]">
+                              {inst.name}
+                            </h3>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setExpandedSymbol(null)}
+                            aria-label="Details schließen"
+                            className="rounded-lg p-1.5 text-[var(--depot-text-muted)] hover:text-[var(--depot-text-primary)] depot-focus shrink-0"
+                          >
+                            <X className="h-4 w-4" aria-hidden="true" />
+                          </button>
+                        </div>
+
+                        <p className="text-xs sm:text-sm text-[var(--depot-text-secondary)] leading-relaxed">
+                          {inst.shortExplanation}
+                        </p>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--depot-border)] bg-[var(--depot-bg-secondary)] px-3 py-2 text-xs">
+                          <div>
+                            <span className="text-[var(--depot-text-muted)]">
+                              Referenzkurs:{' '}
+                            </span>
+                            <strong className="font-mono text-[var(--depot-text-primary)]">
+                              {rowQuote
+                                ? formatOriginalCurrency(
+                                    rowQuote.price,
+                                    inst.currency,
+                                    2,
+                                  )
+                                : '—'}
+                            </strong>
+                            {inst.currency !== 'EUR' && eurPrice > 0 && (
+                              <span className="font-mono text-[var(--depot-accent-lime)] ml-1.5">
+                                (≈ {formatEuro(eurPrice, 2)})
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] text-[var(--depot-text-muted)]">
+                            {rowQuote
+                              ? formatMarketDataStatusBadge(
+                                  rowQuote.status,
+                                  rowQuote.isDemo,
+                                  rowQuote.marketTime ?? rowQuote.timestamp,
+                                ).shortText
+                              : FALLBACK_QUOTE_NOTICE}
+                          </span>
+                        </div>
+
+                        {!unlocked && (
+                          <div className="rounded-xl border border-[var(--depot-warning)]/40 bg-[var(--depot-warning)]/10 p-3 text-xs text-[var(--depot-text-primary)] flex flex-wrap items-center justify-between gap-2">
+                            <span>
+                              Gesperrt: <strong>{unlockExplanationText}</strong>
+                            </span>
+                            <AppLink
+                              to="/lernen"
+                              className="font-bold text-[var(--depot-accent-lime)] underline shrink-0"
+                            >
+                              Zu den Lektionen →
+                            </AppLink>
+                          </div>
+                        )}
+
+                        <div className="flex flex-wrap items-center justify-between gap-2.5 pt-1">
+                          <button
+                            type="button"
+                            data-testid={`open-all-details-${inst.symbol}`}
+                            onClick={() => onOpenAssetDetail(inst, rowQuote)}
+                            className="depot-btn-secondary min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-semibold depot-focus"
+                          >
+                            Alle Details
+                          </button>
+
+                          {unlocked && (
+                            <button
+                              type="button"
+                              data-testid={`proceed-buy-${inst.symbol}`}
+                              onClick={() =>
+                                handleSelectInstrumentToConfigure(inst)
+                              }
+                              className="depot-btn-lime min-h-[40px] rounded-xl px-4 py-2 text-xs font-bold inline-flex items-center gap-1.5 depot-focus"
+                            >
+                              <span>Betrag wählen & kaufen</span>
+                              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
-            </div>
-          )}
-
-          {/* Compact Preview Sheet / Drawer when a search row is clicked */}
-          {previewDrawerInstrument && (
-            <div
-              role="dialog"
-              aria-modal="false"
-              aria-labelledby="instrument-preview-title"
-              className="rounded-2xl border border-[var(--depot-accent-lime)]/40 bg-[var(--depot-surface-elevated)] p-4 sm:p-5 space-y-4 shadow-xl"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--depot-text-secondary)]">
-                    <span className="font-mono font-bold text-[var(--depot-accent-lime)]">
-                      {previewDrawerInstrument.symbol}
-                    </span>
-                    <span aria-hidden="true">·</span>
-                    <span>{previewDrawerInstrument.assetType}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>
-                      {previewDrawerInstrument.exchange} · {previewDrawerInstrument.currency}
-                    </span>
-                    <span aria-hidden="true">·</span>
-                    <span>Risiko: {previewDrawerInstrument.riskCategory}</span>
-                  </div>
-                  <h3
-                    id="instrument-preview-title"
-                    className="mt-1 text-base font-bold text-[var(--depot-text-primary)]"
-                  >
-                    {previewDrawerInstrument.name}
-                  </h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setPreviewDrawerInstrument(null)}
-                  aria-label="Vorschau schließen"
-                  className="rounded-lg p-1.5 text-[var(--depot-text-muted)] hover:text-[var(--depot-text-primary)]"
-                >
-                  <X className="h-4 w-4" aria-hidden="true" />
-                </button>
-              </div>
-
-              <p className="text-xs sm:text-sm text-[var(--depot-text-secondary)] leading-relaxed">
-                {previewDrawerInstrument.shortExplanation}
-              </p>
-
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--depot-border)] bg-[var(--depot-bg-secondary)] px-3.5 py-2.5 text-xs">
-                <div>
-                  <span className="text-[var(--depot-text-muted)]">Referenzkurs: </span>
-                  <strong className="font-mono text-[var(--depot-text-primary)]">
-                    {drawerQuote
-                      ? formatOriginalCurrency(
-                          drawerQuote.price,
-                          previewDrawerInstrument.currency,
-                          2,
-                        )
-                      : '—'}
-                  </strong>
-                </div>
-                <span className="text-[11px] text-[var(--depot-text-muted)]">
-                  {drawerQuote
-                    ? formatMarketDataStatusBadge(
-                        drawerQuote.status,
-                        drawerQuote.isDemo,
-                        drawerQuote.marketTime ?? drawerQuote.timestamp,
-                      ).shortText
-                    : FALLBACK_QUOTE_NOTICE}
-                </span>
-              </div>
-
-              {!isInstrumentUnlocked(previewDrawerInstrument.symbol) && (
-                <div className="rounded-xl border border-[var(--depot-warning)]/40 bg-[var(--depot-warning)]/10 p-3 text-xs text-[var(--depot-text-primary)] flex items-center justify-between gap-2">
-                  <span>
-                    Gesperrt: <strong>{previewDrawerInstrument.unlockRequirementText}</strong>
-                  </span>
-                  <AppLink
-                    to="/lernen"
-                    className="font-bold text-[var(--depot-accent-lime)] underline shrink-0"
-                  >
-                    Zu den Lektionen →
-                  </AppLink>
-                </div>
-              )}
-
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => onOpenAssetDetail(previewDrawerInstrument, drawerQuote)}
-                  className="depot-btn-secondary min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-semibold"
-                >
-                  Alle Details
-                </button>
-                {isInstrumentUnlocked(previewDrawerInstrument.symbol) && (
-                  <button
-                    type="button"
-                    onClick={() => handleSelectInstrumentToConfigure(previewDrawerInstrument)}
-                    className="depot-btn-lime min-h-[40px] rounded-xl px-4 py-2 text-xs font-bold inline-flex items-center gap-1.5"
-                  >
-                    <span>Auswählen</span>
-                    <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-                  </button>
-                )}
-              </div>
             </div>
           )}
         </div>

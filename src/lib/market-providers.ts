@@ -6,8 +6,13 @@ import {
   getSourceQualifiedAssetKey,
 } from './market-demo-adapter';
 import type {
+  AssetHistory,
+  HistoricalCandle,
+  HistoricalDataSource,
+  HistoricalSummaryStats,
   MarketAsset,
   MarketDataProvider,
+  MarketHistorySnapshot,
   MarketPriceRecord,
   MarketPriceRepository,
   MarketQuote,
@@ -1431,4 +1436,743 @@ export async function generateStaticMarketSnapshot(
     refreshCount: (prior?.refreshCount ?? 0) + 1,
   };
 }
+
+/**
+ * Normalizes a date string ("MM/DD/YYYY" or "YYYY-MM-DD" or ISO) into "YYYY-MM-DD".
+ */
+export function normalizeHistoricalDate(rawDate: unknown): string | null {
+  if (typeof rawDate !== 'string') return null;
+  const trimmed = rawDate.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const ms = Date.parse(`${trimmed}T00:00:00Z`);
+    return Number.isFinite(ms) ? trimmed : null;
+  }
+  const slashMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed);
+  if (slashMatch) {
+    const mm = slashMatch[1]!.padStart(2, '0');
+    const dd = slashMatch[2]!.padStart(2, '0');
+    const yyyy = slashMatch[3]!;
+    const isoDate = `${yyyy}-${mm}-${dd}`;
+    const ms = Date.parse(`${isoDate}T00:00:00Z`);
+    return Number.isFinite(ms) ? isoDate : null;
+  }
+  const parsedMs = Date.parse(trimmed);
+  if (Number.isFinite(parsedMs)) {
+    return new Date(parsedMs).toISOString().slice(0, 10);
+  }
+  return null;
+}
+
+/**
+ * Validates that a daily OHLC candle satisfies all integrity constraints:
+ * - valid YYYY-MM-DD date;
+ * - open, high, low, close are finite and strictly positive (> 0);
+ * - high >= open, high >= close, low <= open, low <= close, high >= low.
+ */
+export function isValidHistoricalCandle(
+  raw: unknown,
+): raw is HistoricalCandle {
+  if (!raw || typeof raw !== 'object') return false;
+  const c = raw as Record<string, unknown>;
+  const date = normalizeHistoricalDate(c.date);
+  if (!date) return false;
+
+  const open = typeof c.open === 'number' ? c.open : Number.NaN;
+  const high = typeof c.high === 'number' ? c.high : Number.NaN;
+  const low = typeof c.low === 'number' ? c.low : Number.NaN;
+  const close = typeof c.close === 'number' ? c.close : Number.NaN;
+
+  if (
+    !Number.isFinite(open) ||
+    !Number.isFinite(high) ||
+    !Number.isFinite(low) ||
+    !Number.isFinite(close) ||
+    open <= 0 ||
+    high <= 0 ||
+    low <= 0 ||
+    close <= 0
+  ) {
+    return false;
+  }
+
+  const eps = 1e-6;
+  if (
+    high + eps < open ||
+    high + eps < close ||
+    low - eps > open ||
+    low - eps > close ||
+    high + eps < low
+  ) {
+    return false;
+  }
+
+  if (c.volume !== undefined && c.volume !== null) {
+    if (
+      typeof c.volume !== 'number' ||
+      !Number.isFinite(c.volume) ||
+      c.volume < 0
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Normalizes, validates, deduplicates by date, and sorts candles chronologically (ascending).
+ * Malformed candles are rejected rather than rendered.
+ */
+export function normalizeAndValidateCandles(
+  candidates: unknown[],
+): HistoricalCandle[] {
+  const byDate = new Map<string, HistoricalCandle>();
+
+  for (const item of candidates) {
+    if (!item || typeof item !== 'object') continue;
+    const raw = item as Record<string, unknown>;
+    const normalizedDate = normalizeHistoricalDate(raw.date);
+    if (!normalizedDate) continue;
+
+    const candidateObj = {
+      ...raw,
+      date: normalizedDate,
+    };
+
+    if (!isValidHistoricalCandle(candidateObj)) {
+      continue;
+    }
+
+    const open = roundMoney(candidateObj.open);
+    const close = roundMoney(candidateObj.close);
+    const high = roundMoney(candidateObj.high);
+    const low = roundMoney(candidateObj.low);
+
+    if (
+      open <= 0 ||
+      high <= 0 ||
+      low <= 0 ||
+      close <= 0 ||
+      high < open ||
+      high < close ||
+      low > open ||
+      low > close ||
+      high < low
+    ) {
+      continue;
+    }
+
+    const volume =
+      typeof candidateObj.volume === 'number' &&
+      Number.isFinite(candidateObj.volume) &&
+      candidateObj.volume >= 0
+        ? Math.round(candidateObj.volume)
+        : null;
+
+    byDate.set(normalizedDate, {
+      date: normalizedDate,
+      open,
+      high,
+      low,
+      close,
+      ...(volume !== null ? { volume } : {}),
+    });
+  }
+
+  return Array.from(byDate.values()).sort((a, b) =>
+    a.date.localeCompare(b.date),
+  );
+}
+
+/**
+ * Merges existing and incoming daily candles, deduplicating by date, sorting ascending,
+ * and retaining approximately the latest 365 calendar days.
+ */
+export function mergeAndTrimHistoricalCandles(
+  existingCandles: HistoricalCandle[],
+  incomingCandles: HistoricalCandle[],
+  maxCalendarDays = 370,
+): HistoricalCandle[] {
+  const combined = normalizeAndValidateCandles([
+    ...existingCandles,
+    ...incomingCandles,
+  ]);
+  if (combined.length === 0) return [];
+
+  const latestDateStr = combined[combined.length - 1]!.date;
+  const latestMs = Date.parse(`${latestDateStr}T00:00:00Z`);
+  if (!Number.isFinite(latestMs)) return combined;
+
+  const cutoffMs = latestMs - maxCalendarDays * 24 * 60 * 60 * 1000;
+  const cutoffDateStr = new Date(cutoffMs).toISOString().slice(0, 10);
+
+  return combined.filter((c) => c.date >= cutoffDateStr);
+}
+
+/**
+ * Computes 1-year summary statistics directly from loaded historical candles.
+ */
+export function computeHistoricalSummaryStats(
+  candles: HistoricalCandle[],
+): HistoricalSummaryStats | null {
+  const valid = normalizeAndValidateCandles(candles);
+  if (valid.length === 0) return null;
+
+  let minLow = valid[0]!.low;
+  let maxHigh = valid[0]!.high;
+  for (const c of valid) {
+    if (c.low < minLow) minLow = c.low;
+    if (c.high > maxHigh) maxHigh = c.high;
+  }
+
+  const firstClose = valid[0]!.close;
+  const latestClose = valid[valid.length - 1]!.close;
+  const changeAbsolute = roundMoney(latestClose - firstClose);
+  const changePercent =
+    firstClose > 0
+      ? roundMoney(((latestClose - firstClose) / firstClose) * 100)
+      : 0;
+
+  return {
+    minLow: roundMoney(minLow),
+    maxHigh: roundMoney(maxHigh),
+    firstClose: roundMoney(firstClose),
+    latestClose: roundMoney(latestClose),
+    changeAbsolute,
+    changePercent,
+    startDate: valid[0]!.date,
+    endDate: valid[valid.length - 1]!.date,
+    candleCount: valid.length,
+  };
+}
+
+function parseNasdaqVolume(raw: unknown): number | null {
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) && raw >= 0 ? Math.round(raw) : null;
+  }
+  if (typeof raw !== 'string') return null;
+  const cleaned = raw.trim().replace(/[,\s]/g, '');
+  if (!/^\d+(\.\d+)?$/.test(cleaned)) return null;
+  const parsed = Number.parseFloat(cleaned);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : null;
+}
+
+/**
+ * Parses daily OHLC rows from Nasdaq's public historical endpoint:
+ * https://api.nasdaq.com/api/quote/{SYMBOL}/historical?assetclass=stocks&fromdate=YYYY-MM-DD&limit=365&todate=YYYY-MM-DD
+ */
+export function parseNasdaqHistoricalPayload(
+  payload: unknown,
+  expectedSymbol: string,
+): HistoricalCandle[] {
+  if (!payload || typeof payload !== 'object') {
+    throw new MarketProviderError(
+      'INVALID_QUOTE_DATA',
+      `Ungültige historische Nasdaq-Antwort für ${expectedSymbol}.`,
+    );
+  }
+
+  const root = payload as {
+    data?: {
+      tradesTable?: {
+        rows?: Array<{
+          date?: unknown;
+          open?: unknown;
+          high?: unknown;
+          low?: unknown;
+          close?: unknown;
+          volume?: unknown;
+        }> | null;
+      } | null;
+    } | null;
+  };
+
+  const rows = root.data?.tradesTable?.rows;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new MarketProviderError(
+      'INVALID_QUOTE_DATA',
+      `Keine historischen Kerzendaten von Nasdaq für ${expectedSymbol}.`,
+    );
+  }
+
+  const rawCandles: unknown[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    const date = normalizeHistoricalDate(row.date);
+    const open = parseNasdaqPrice(row.open);
+    const high = parseNasdaqPrice(row.high);
+    const low = parseNasdaqPrice(row.low);
+    const close = parseNasdaqPrice(row.close);
+    const volume = parseNasdaqVolume(row.volume);
+
+    if (
+      !date ||
+      open === null ||
+      high === null ||
+      low === null ||
+      close === null
+    ) {
+      continue;
+    }
+
+    rawCandles.push({
+      date,
+      open,
+      high,
+      low,
+      close,
+      ...(volume !== null ? { volume } : {}),
+    });
+  }
+
+  const validated = normalizeAndValidateCandles(rawCandles);
+  if (validated.length === 0) {
+    throw new MarketProviderError(
+      'INVALID_QUOTE_DATA',
+      `Keine gültigen OHLC-Kerzen in der Nasdaq-Historie für ${expectedSymbol}.`,
+    );
+  }
+  return validated;
+}
+
+/**
+ * Parses daily OHLC arrays from Börse Frankfurt's public TradingView history endpoint:
+ * https://api.boerse-frankfurt.de/v1/tradingview/history?symbol={MIC}:{ISIN}&resolution=1D&from={UNIX_SEC}&to={UNIX_SEC}
+ */
+export function parseBoerseFrankfurtHistoricalPayload(
+  payload: unknown,
+  expectedIsin: string,
+): HistoricalCandle[] {
+  if (!payload || typeof payload !== 'object') {
+    throw new MarketProviderError(
+      'INVALID_QUOTE_DATA',
+      `Ungültige historische Börse-Frankfurt-Antwort für ${expectedIsin}.`,
+    );
+  }
+
+  const data = payload as {
+    s?: unknown;
+    t?: unknown[];
+    o?: unknown[];
+    h?: unknown[];
+    l?: unknown[];
+    c?: unknown[];
+    v?: unknown[];
+  };
+
+  if (
+    data.s !== 'ok' ||
+    !Array.isArray(data.t) ||
+    !Array.isArray(data.o) ||
+    !Array.isArray(data.h) ||
+    !Array.isArray(data.l) ||
+    !Array.isArray(data.c) ||
+    data.t.length === 0
+  ) {
+    throw new MarketProviderError(
+      'INVALID_QUOTE_DATA',
+      `Keine historischen OHLC-Daten von Börse Frankfurt für ${expectedIsin}.`,
+    );
+  }
+
+  const len = Math.min(
+    data.t.length,
+    data.o.length,
+    data.h.length,
+    data.l.length,
+    data.c.length,
+  );
+
+  const rawCandles: unknown[] = [];
+  for (let i = 0; i < len; i++) {
+    const tsSec = data.t[i];
+    const open = data.o[i];
+    const high = data.h[i];
+    const low = data.l[i];
+    const close = data.c[i];
+    const vol = Array.isArray(data.v) ? data.v[i] : undefined;
+
+    if (typeof tsSec !== 'number' || !Number.isFinite(tsSec) || tsSec <= 0) {
+      continue;
+    }
+    const date = new Date(tsSec * 1000).toISOString().slice(0, 10);
+    const volume =
+      typeof vol === 'number' && Number.isFinite(vol) && vol >= 0
+        ? Math.round(vol)
+        : null;
+
+    rawCandles.push({
+      date,
+      open,
+      high,
+      low,
+      close,
+      ...(volume !== null ? { volume } : {}),
+    });
+  }
+
+  const validated = normalizeAndValidateCandles(rawCandles);
+  if (validated.length === 0) {
+    throw new MarketProviderError(
+      'INVALID_QUOTE_DATA',
+      `Keine validen OHLC-Kerzen von Börse Frankfurt für ${expectedIsin}.`,
+    );
+  }
+  return validated;
+}
+
+export async function fetchNasdaqHistoricalCandles(
+  asset: MarketAsset,
+  fromDate: string,
+  toDate: string,
+  options?: {
+    fetchFn?: typeof fetch;
+    timeoutMs?: number;
+    allowedSymbols?: ReadonlySet<string>;
+  },
+): Promise<HistoricalCandle[]> {
+  const symbol = (asset.symbol ?? asset.id).trim().toUpperCase();
+  if (!isCuratedNasdaqSymbol(symbol, options?.allowedSymbols)) {
+    throw new MarketProviderError(
+      'UNCURATED_ASSET',
+      `Symbol ${symbol} ist nicht Teil des kuratierten Bildungskatalogs.`,
+    );
+  }
+
+  const fetchImpl = options?.fetchFn ?? fetch;
+  const timeoutMs = options?.timeoutMs ?? 12000;
+  const url = `https://api.nasdaq.com/api/quote/${encodeURIComponent(symbol)}/historical?assetclass=stocks&fromdate=${encodeURIComponent(fromDate)}&limit=365&todate=${encodeURIComponent(toDate)}`;
+
+  let res: Response;
+  try {
+    res = await fetchImpl(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    throw new MarketProviderError(
+      'TIMEOUT',
+      err instanceof Error
+        ? `Nasdaq-Historie fehlgeschlagen: ${err.message}`
+        : 'Nasdaq-Historie durch Zeitüberschreitung abgebrochen.',
+    );
+  }
+
+  if (!res.ok) {
+    throw new MarketProviderError(
+      'NASDAQ_HTTP_ERROR',
+      `Nasdaq-Historie nicht verfügbar (HTTP ${res.status}) für ${symbol}.`,
+      res.status,
+    );
+  }
+
+  let jsonPayload: unknown;
+  try {
+    jsonPayload = await res.json();
+  } catch {
+    throw new MarketProviderError(
+      'MALFORMED_JSON',
+      `Ungültiges JSON in Nasdaq-Historie für ${symbol}.`,
+    );
+  }
+
+  return parseNasdaqHistoricalPayload(jsonPayload, symbol);
+}
+
+export async function fetchBoerseFrankfurtHistoricalCandles(
+  asset: MarketAsset,
+  fromDate: string,
+  toDate: string,
+  options?: {
+    fetchFn?: typeof fetch;
+    timeoutMs?: number;
+    allowedIsins?: ReadonlySet<string>;
+  },
+): Promise<HistoricalCandle[]> {
+  const isin = (asset.isin ?? '').trim().toUpperCase();
+  const venue: TradingVenue = asset.venue === 'XFRA' ? 'XFRA' : 'XETR';
+
+  if (!isCuratedBoerseIsin(isin, options?.allowedIsins)) {
+    throw new MarketProviderError(
+      'UNCURATED_ASSET',
+      `ISIN ${isin} ist nicht im kuratierten Bildungskatalog enthalten.`,
+    );
+  }
+
+  const fromSec = Math.floor(Date.parse(`${fromDate}T00:00:00Z`) / 1000);
+  const toSec = Math.floor(Date.parse(`${toDate}T23:59:59Z`) / 1000);
+  const fetchImpl = options?.fetchFn ?? fetch;
+  const timeoutMs = options?.timeoutMs ?? 15000;
+  const symbolParam = `${venue}:${isin}`;
+  const url = `https://api.boerse-frankfurt.de/v1/tradingview/history?symbol=${encodeURIComponent(symbolParam)}&resolution=1D&from=${fromSec}&to=${toSec}`;
+
+  let res: Response;
+  try {
+    res = await fetchImpl(url, {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'Mozilla/5.0',
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    throw new MarketProviderError(
+      'TIMEOUT',
+      err instanceof Error
+        ? `Börse-Frankfurt-Historie fehlgeschlagen: ${err.message}`
+        : 'Börse-Frankfurt-Historie durch Zeitüberschreitung abgebrochen.',
+    );
+  }
+
+  if (!res.ok) {
+    throw new MarketProviderError(
+      'BOERSE_FRANKFURT_HTTP_ERROR',
+      `Börse-Frankfurt-Historie nicht verfügbar (HTTP ${res.status}) für ${isin}.`,
+      res.status,
+    );
+  }
+
+  let jsonPayload: unknown;
+  try {
+    jsonPayload = await res.json();
+  } catch {
+    throw new MarketProviderError(
+      'MALFORMED_JSON',
+      `Ungültiges JSON in Börse-Frankfurt-Historie für ${isin}.`,
+    );
+  }
+
+  return parseBoerseFrankfurtHistoricalPayload(jsonPayload, isin);
+}
+
+/**
+ * Validates and normalizes a loaded `public/market-history.json` snapshot.
+ */
+export function parseMarketHistorySnapshot(
+  raw: unknown,
+): MarketHistorySnapshot | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  if (!Array.isArray(obj.histories)) return null;
+
+  const generatedAt =
+    typeof obj.generatedAt === 'string' && obj.generatedAt.trim()
+      ? obj.generatedAt
+      : new Date().toISOString();
+
+  const histories: AssetHistory[] = [];
+  for (const item of obj.histories) {
+    if (!item || typeof item !== 'object') continue;
+    const h = item as Record<string, unknown>;
+    const assetId =
+      typeof h.assetId === 'string' ? h.assetId.trim() : '';
+    if (!assetId) continue;
+
+    const currency: SupportedCurrency =
+      h.currency === 'USD' ? 'USD' : 'EUR';
+    const priceCurrency: SupportedCurrency =
+      h.priceCurrency === 'USD' ? 'USD' : currency;
+    const source: HistoricalDataSource =
+      h.source === 'nasdaq-prototype'
+        ? 'nasdaq-prototype'
+        : 'boerse-frankfurt-prototype';
+    const candles = Array.isArray(h.candles)
+      ? normalizeAndValidateCandles(h.candles)
+      : [];
+    const status: 'available' | 'stale' | 'unavailable' =
+      candles.length === 0
+        ? 'unavailable'
+        : h.status === 'stale'
+          ? 'stale'
+          : 'available';
+
+    histories.push({
+      assetId,
+      currency,
+      priceCurrency,
+      source,
+      range: '1Y',
+      interval: '1D',
+      generatedAt:
+        typeof h.generatedAt === 'string' && h.generatedAt.trim()
+          ? h.generatedAt
+          : generatedAt,
+      candles,
+      status,
+    });
+  }
+
+  return {
+    generatedAt,
+    histories,
+  };
+}
+
+export interface GenerateMarketHistorySnapshotOptions {
+  previousHistorySnapshot?: MarketHistorySnapshot | null;
+  referenceEndDate?: string;
+  fetchFn?: typeof fetch;
+  nowFn?: () => Date;
+  concurrency?: number;
+  timeoutMs?: number;
+  assets?: MarketAsset[];
+  forceFullRefresh?: boolean;
+}
+
+/**
+ * Generates or incrementally updates `public/market-history.json`.
+ * - Deduplicates assets so each unique upstream instrument is queried at most once;
+ * - Uses incremental range requests when a previous valid 1-year history exists (>= 180 candles);
+ * - Validates, deduplicates, and sorts every candle chronologically;
+ * - Preserves previous valid history as `stale` if the daily update fails;
+ * - Never fabricates or substitutes demo candles.
+ */
+export async function generateMarketHistorySnapshot(
+  options: GenerateMarketHistorySnapshotOptions = {},
+): Promise<MarketHistorySnapshot> {
+  const nowFn = options.nowFn ?? (() => new Date());
+  const now = nowFn();
+  const generatedAt = now.toISOString();
+  const toDate =
+    options.referenceEndDate &&
+    /^\d{4}-\d{2}-\d{2}$/.test(options.referenceEndDate)
+      ? options.referenceEndDate
+      : generatedAt.slice(0, 10);
+  const toMs = Date.parse(`${toDate}T00:00:00Z`);
+  const fullFromDate = new Date(toMs - 365 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+
+  const assets = (options.assets ?? CURATED_MARKET_ASSETS).filter(
+    (a) =>
+      a.assetType !== 'cash' &&
+      (a.source === 'nasdaq-prototype' ||
+        a.source === 'boerse-frankfurt-prototype'),
+  );
+  const priorMap = new Map<string, AssetHistory>();
+  for (const h of options.previousHistorySnapshot?.histories ?? []) {
+    if (h.candles.length > 0 && h.status !== 'unavailable') {
+      priorMap.set(h.assetId.toUpperCase(), h);
+    }
+  }
+
+  const concurrency = options.concurrency ?? 4;
+  const settled = await runWithConcurrencyLimit(
+    assets,
+    concurrency,
+    async (asset): Promise<{ asset: MarketAsset; candles: HistoricalCandle[] }> => {
+      const prior = priorMap.get(asset.id.toUpperCase());
+      let queryFromDate = fullFromDate;
+
+      if (
+        !options.forceFullRefresh &&
+        prior &&
+        prior.candles.length >= 180
+      ) {
+        const lastCandleDate = prior.candles[prior.candles.length - 1]!.date;
+        const lastMs = Date.parse(`${lastCandleDate}T00:00:00Z`);
+        if (Number.isFinite(lastMs)) {
+          // Request 7 days overlap to safely cover weekends/holidays and revisions
+          const incrementalFrom = new Date(lastMs - 7 * 24 * 60 * 60 * 1000)
+            .toISOString()
+            .slice(0, 10);
+          if (incrementalFrom > fullFromDate && incrementalFrom <= toDate) {
+            queryFromDate = incrementalFrom;
+          }
+        }
+      }
+
+      if (asset.source === 'nasdaq-prototype') {
+        const fetched = await fetchNasdaqHistoricalCandles(
+          asset,
+          queryFromDate,
+          toDate,
+          {
+            fetchFn: options.fetchFn,
+            timeoutMs: options.timeoutMs,
+          },
+        );
+        return {
+          asset,
+          candles: prior
+            ? mergeAndTrimHistoricalCandles(prior.candles, fetched)
+            : mergeAndTrimHistoricalCandles([], fetched),
+        };
+      }
+
+      const fetched = await fetchBoerseFrankfurtHistoricalCandles(
+        asset,
+        queryFromDate,
+        toDate,
+        {
+          fetchFn: options.fetchFn,
+          timeoutMs: options.timeoutMs,
+        },
+      );
+      return {
+        asset,
+        candles: prior
+          ? mergeAndTrimHistoricalCandles(prior.candles, fetched)
+          : mergeAndTrimHistoricalCandles([], fetched),
+      };
+    },
+  );
+
+  const histories: AssetHistory[] = settled.map((res, idx) => {
+    const asset = assets[idx]!;
+    const prior = priorMap.get(asset.id.toUpperCase());
+    const source: HistoricalDataSource =
+      asset.source === 'nasdaq-prototype'
+        ? 'nasdaq-prototype'
+        : 'boerse-frankfurt-prototype';
+
+    if (res.status === 'fulfilled' && res.value.candles.length > 0) {
+      return {
+        assetId: asset.id,
+        currency: asset.quoteCurrency,
+        priceCurrency: asset.quoteCurrency,
+        source,
+        range: '1Y',
+        interval: '1D',
+        generatedAt,
+        candles: res.value.candles,
+        status: 'available',
+      };
+    }
+
+    if (prior && prior.candles.length > 0) {
+      return {
+        ...prior,
+        assetId: asset.id,
+        currency: asset.quoteCurrency,
+        priceCurrency: asset.quoteCurrency,
+        source,
+        range: '1Y',
+        interval: '1D',
+        status: 'stale',
+      };
+    }
+
+    return {
+      assetId: asset.id,
+      currency: asset.quoteCurrency,
+      priceCurrency: asset.quoteCurrency,
+      source,
+      range: '1Y',
+      interval: '1D',
+      generatedAt,
+      candles: [],
+      status: 'unavailable',
+    };
+  });
+
+  return {
+    generatedAt,
+    histories,
+  };
+}
+
 

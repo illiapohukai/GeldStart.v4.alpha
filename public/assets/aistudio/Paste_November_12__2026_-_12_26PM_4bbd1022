@@ -1,0 +1,832 @@
+Continue working in the EXISTING GitHub-connected GeldStart v4.alpha workspace.
+
+Do not create a new project, second application, duplicate src directory, separate backend, or parallel Depot.
+
+The existing implementation is the source of truth.
+
+CURRENT WORKING STATE
+
+The project already has:
+
+- the existing GeldStart design and routing;
+- the Learn Depot at /depot;
+- 5,000 EUR virtual starting capital;
+- virtual buy and sell mechanics;
+- fractional quantities;
+- transaction history;
+- lesson-based asset unlocking;
+- a curated catalogue of 18 assets;
+- prototype quote providers for Nasdaq and Börse Frankfurt;
+- Frankfurter USD/EUR conversion;
+- a static GitHub Actions market snapshot;
+- public/market-prices.json;
+- automatic weekday snapshot generation;
+- GitHub Pages deployment;
+- frontend loading priority:
+  1. local/full-stack API when available;
+  2. static market snapshot;
+  3. clearly labelled demo fallback.
+
+Preserve all of this.
+
+Do not reimplement the quote system.
+
+Do not add Render, Railway, Supabase, Firebase, Vercel Functions, Cloudflare Workers, Finnhub, Twelve Data, TradingView, or another market-data provider in this task.
+
+Do not modify the existing buy/sell calculations unless a bug must be fixed.
+
+All visible user-facing text must remain in German.
+
+GOALS
+
+This task has four focused goals:
+
+1. Replace the currently hardcoded Depot price charts with real historical daily market data if the existing prototype sources support it reliably.
+2. Add an accessible one-year candlestick chart using daily OHLC values if reliable OHLC data can be retrieved.
+3. Fix the asset-selection and asset-detail navigation so users immediately see that an asset was opened.
+4. Fix the mobile layout for locked assets and integrate the existing GeldStart app icon correctly.
+5. The final GeldStart icon is attached to this request and must replace the current placeholder “G” logo on the home/start screen and become the installable web-app icon.
+
+PHASE 1: INSPECT BEFORE MODIFYING
+
+Inspect:
+
+- src/components/depot/DepotCharts.tsx;
+- src/components/depot/AssetDetailView.tsx;
+- src/components/depot/VirtualTradeSheet.tsx;
+- src/pages/DepotPage.tsx;
+- src/lib/market-types.ts;
+- src/lib/market-providers.ts;
+- src/lib/market-service.ts;
+- scripts/update-market-snapshot.ts;
+- public/market-prices.json;
+- the curated asset catalogue;
+- current chart dependencies in package.json;
+- all existing icons and image assets in public and src/assets;
+- the current app manifest, favicon, metadata.json, and index.html;
+- the current GitHub Pages workflow;
+- current responsive CSS for asset rows and locked states.
+
+Also inspect how asset selection currently works and why AssetDetailView appears below the complete asset list.
+
+Do not stop after inspection. Implement the requested improvements.
+
+PHASE 2: VERIFY HISTORICAL DATA AVAILABILITY
+
+The existing latest-quote endpoints do not automatically guarantee historical OHLC data.
+
+Before implementing a historical chart, investigate whether the already used prototype sources provide stable public historical endpoints for the curated instruments:
+
+- Nasdaq public website endpoints for US-listed instruments;
+- Börse Frankfurt public website endpoints for Xetra/Frankfurt instruments.
+
+The required data is:
+
+- one daily candle per trading day;
+- approximately one calendar year;
+- date;
+- open;
+- high;
+- low;
+- close;
+- optional volume;
+- source;
+- fetchedAt.
+
+IMPORTANT:
+
+- Do not scrape rendered HTML pages.
+- Do not use browser automation.
+- Do not invent endpoint URLs.
+- Do not fabricate historical values.
+- Do not derive fake OHLC candles from the current price.
+- Do not keep the existing scripted chart while labelling it as market history.
+- Do not add a new third-party provider without explicit approval.
+- Do not make historical data requests from browser components.
+
+If reliable historical OHLC endpoints are available from the current sources, implement them in the existing snapshot workflow.
+
+If reliable historical OHLC data is not available for a specific asset or source:
+
+- keep that asset functional for buying and selling;
+- hide the candlestick option for that asset;
+- show a German message such as:
+  “Für dieses Wertpapier stehen in der Prototyp-Version keine verlässlichen historischen Kursdaten zur Verfügung.”
+- do not show a fake chart.
+
+PHASE 3: STATIC HISTORICAL SNAPSHOT
+
+If reliable OHLC data is available, extend the existing static GitHub Actions snapshot approach.
+
+Do not require a running backend on GitHub Pages.
+
+Create a static historical snapshot, preferably:
+
+public/market-history.json
+
+Use a stable schema equivalent to:
+
+interface HistoricalCandle {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number | null;
+}
+
+interface AssetHistory {
+  assetId: string;
+  currency: 'EUR' | 'USD';
+  priceCurrency: 'EUR' | 'USD';
+  source: 'nasdaq-prototype' | 'boerse-frankfurt-prototype';
+  range: '1Y';
+  interval: '1D';
+  generatedAt: string;
+  candles: HistoricalCandle[];
+  status: 'available' | 'stale' | 'unavailable';
+}
+
+interface MarketHistorySnapshot {
+  generatedAt: string;
+  histories: AssetHistory[];
+}
+
+Requirements:
+
+1. One year of daily candles where available.
+2. Sort candles in ascending date order.
+3. Remove duplicate dates.
+4. Validate every candle:
+   - all prices must be finite and positive;
+   - high >= open;
+   - high >= close;
+   - low <= open;
+   - low <= close;
+   - high >= low.
+5. Reject malformed candles rather than rendering them.
+6. Preserve the previous valid history if the daily update fails.
+7. Mark preserved history as stale.
+8. Never replace valid historical data with generated or demo candles.
+9. Load the file through:
+   `${import.meta.env.BASE_URL}market-history.json`
+10. Confirm that Vite copies it into:
+   dist/market-history.json
+
+Do not request the complete one-year history every day if this can be avoided safely.
+
+Preferred update strategy:
+
+- load the previous history snapshot;
+- request only missing recent trading days if the source supports date ranges;
+- merge and deduplicate;
+- retain only approximately the latest 365 calendar days;
+- perform a full refresh only when necessary.
+
+If the current source only supports full-range requests, make only one historical request per supported asset during the daily GitHub Action.
+
+Use concurrency limiting to avoid hitting the current public endpoints aggressively.
+
+PHASE 4: GITHUB ACTIONS AUTOMATION
+
+Extend the existing snapshot automation, do not replace it.
+
+The existing scheduled workflow must continue updating latest prices on weekdays.
+
+Add historical snapshot generation to the same workflow or the same snapshot command where technically clean.
+
+The workflow should perform:
+
+1. update latest quotes;
+2. update available historical OHLC data;
+3. preserve previous valid data after partial failures;
+4. run tests;
+5. build the Vite application;
+6. verify:
+   - dist/market-prices.json exists;
+   - dist/market-history.json exists if historical support was implemented;
+7. deploy to GitHub Pages.
+
+Do not introduce a second deployment workflow unless strictly required.
+
+Do not add credentials or API keys.
+
+A single unavailable asset must not fail the entire deployment.
+
+PHASE 5: REAL ONE-YEAR CHART
+
+Replace hardcoded price-series data in the Depot with the static historical snapshot where available.
+
+The default range should be:
+
+“1 Jahr”
+
+The chart must show actual daily historical values from the snapshot.
+
+Do not use interpolated or randomly generated points.
+
+Provide two chart modes if the installed chart library supports both cleanly:
+
+- “Linie”
+- “Kerzen”
+
+Default mode:
+
+- use “Linie” on very small mobile screens if the candlestick chart becomes unreadable;
+- preserve the user’s selected chart mode locally;
+- permit switching to “Kerzen”.
+
+CANDLESTICK REQUIREMENTS
+
+Each daily candle must visually represent:
+
+- opening price;
+- highest price;
+- lowest price;
+- closing price.
+
+Use conventional chart semantics:
+
+- rising candle: close >= open;
+- falling candle: close < open;
+- wick: low to high;
+- body: open to close.
+
+Use the existing GeldStart visual system:
+
+- dark background;
+- lime-green accent;
+- muted neutral grid;
+- sufficient contrast;
+- no bright trading-terminal redesign;
+- no casino-like animation.
+
+For negative candles, use a muted red or warm warning tone that remains readable in the current dark theme.
+
+TOOLTIP / SELECTED CANDLE
+
+On hover, tap, keyboard focus, or selected candle, show:
+
+- Datum;
+- Eröffnung;
+- Hoch;
+- Tief;
+- Schluss;
+- optional Volumen;
+- currency;
+- source status if stale.
+
+German format example:
+
+Datum: 12.11.2026
+Eröffnung: 128,42 €
+Hoch: 131,10 €
+Tief: 127,95 €
+Schluss: 130,79 €
+
+On mobile, tapping a candle must lock the tooltip until the user taps elsewhere or selects another candle.
+
+Do not require hover for essential information.
+
+CHART SUMMARY
+
+Above or below the chart, show:
+
+- 1-year minimum;
+- 1-year maximum;
+- first available close;
+- latest close;
+- absolute change;
+- percentage change;
+- data date.
+
+Example labels:
+
+- “Jahrestief”
+- “Jahreshoch”
+- “Startwert”
+- “Letzter Schlusskurs”
+- “Veränderung in 1 Jahr”
+
+These values must be derived from the loaded candles.
+
+Do not describe past performance as a forecast.
+
+Add the notice:
+
+“Historische Kursentwicklung, keine Prognose.”
+
+ACCESSIBILITY
+
+- chart mode controls must be real buttons;
+- provide visible focus states;
+- add accessible German labels;
+- do not encode candle direction only by color;
+- include an icon, pattern, label, or textual tooltip distinction;
+- ensure the chart remains usable at 320 px width.
+
+PHASE 6: ASSET SELECTION UX
+
+CURRENT PROBLEM
+
+When a user taps an asset in the asset catalogue, the detailed information is rendered far below the visible area.
+
+The page appears unchanged, even though AssetDetailView was opened lower down.
+
+FIX
+
+Do not render the selected asset detail only below the entire asset catalogue.
+
+Use one of these implementations, choosing the one that best matches the existing component structure:
+
+PREFERRED MOBILE BEHAVIOR
+
+- tapping an unlocked asset expands an inline detail panel directly below the selected asset row;
+- use a short, smooth height/opacity animation;
+- keep the selected asset visually highlighted;
+- collapse any previously opened asset detail;
+- keep only one inline asset detail open at a time.
+
+DESKTOP BEHAVIOR
+
+- inline expansion is acceptable;
+- alternatively, use an existing side panel only if the project already has such a pattern.
+
+Do not create a completely separate visual system.
+
+ANIMATION
+
+Use a subtle transition approximately 180–260 ms.
+
+Respect:
+
+prefers-reduced-motion: reduce
+
+Do not create long or distracting animations.
+
+SELECTED STATE
+
+When an unlocked asset is selected:
+
+- change the button label from “Auswählen” to “Ausgewählt” or visually mark the row;
+- use aria-expanded;
+- use aria-controls;
+- preserve keyboard operation;
+- scroll the expanded panel into view only when needed.
+
+Do not unexpectedly move the user to the bottom of the whole page.
+
+PHASE 7: “ALLE DETAILS” SCROLL BEHAVIOR
+
+CURRENT PROBLEM
+
+After tapping the button that opens all asset details, the displayed page or view changes but retains the previous scroll position.
+
+FIX
+
+Locate the exact route/state transition triggered by the German button equivalent to:
+
+“Alle Details”
+
+After the detail page/view is mounted:
+
+- scroll the correct scroll container to the top;
+- use smooth scrolling only when reduced motion is not requested;
+- otherwise use immediate scrolling;
+- set focus to the main detail heading or detail container for accessibility.
+
+Preferred behavior:
+
+window.scrollTo({ top: 0, behavior: 'smooth' })
+
+But only use window if window is actually the scrolling container.
+
+If the application uses an internal scroll container, scroll that element instead.
+
+Do not add arbitrary timeouts unless required by the current rendering architecture.
+
+Use a layout effect, route change effect, or a small reusable navigation helper.
+
+Verify this on:
+
+- mobile viewport 390 × 844;
+- desktop viewport 1440 × 900.
+
+PHASE 8: LOCKED ASSET MOBILE LAYOUT
+
+CURRENT PROBLEM OBSERVED IN THE CURRENT MOBILE UI
+
+The locked asset rows contain overlapping elements:
+
+- asset symbol and metadata;
+- price;
+- price date;
+- “Gesperrt” button;
+- unlock explanation such as:
+  “Freigeschaltet nach Lektion 1 ‚Grundlagen‘”
+
+The unlock explanation currently overlaps the asset name, price, and date.
+
+TARGET LAYOUT
+
+For a locked asset, structure the right-hand status area as one vertical block:
+
+[ Gesperrt button/badge ]
+[ unlock explanation directly underneath ]
+
+Example:
+
+Gesperrt
+Freigeschaltet nach Lektion 1
+„Grundlagen“
+
+Place this block on the right side of the asset card on wider mobile layouts.
+
+The unlock explanation must be visually associated with the lock status, not floating over the middle content.
+
+Requirements:
+
+- no absolute positioning for the unlock explanation unless absolutely necessary;
+- use CSS grid or flex layout;
+- no overlap at 320 px, 360 px, 390 px, or 430 px widths;
+- permit the explanation to wrap naturally;
+- preserve a minimum card height based on content;
+- do not truncate the required lesson name;
+- price and date remain in their own column;
+- asset name remains readable;
+- the lock block must not cover the asset description;
+- use a smaller but readable text size for the explanation;
+- lock status cannot be conveyed only by opacity.
+
+Suggested grid approach on mobile:
+
+- asset icon column;
+- asset information and price column;
+- action/status column.
+
+For very narrow screens below approximately 360 px:
+
+- allow the lock/status block to move to a full-width second row;
+- align it cleanly under the main asset information;
+- do not squeeze three columns until they overlap.
+
+For unlocked assets:
+
+- preserve the current “Auswählen” action;
+- ensure the price date does not collide with the button.
+
+Test the exact assets visible in the current screenshot:
+
+- EUNL.DE;
+- VWCE.DE;
+- IEGA.DE;
+- 4GLD.DE.
+
+PHASE 9: USE THE UPLOADED GELDSTART ICON
+
+A new final GeldStart icon is attached to this request.
+
+This uploaded icon is the authoritative visual asset for this task.
+
+Do not recreate, redraw, reinterpret, recolor, simplify, or replace the uploaded icon.
+
+Do not continue using the current placeholder logo consisting of a plain black “G” on a green background.
+
+FIRST INSPECT THE UPLOADED ICON
+
+Before modifying the project:
+
+1. Locate the newly uploaded icon file.
+2. Verify its:
+   - file type;
+   - dimensions;
+   - aspect ratio;
+   - transparency;
+   - image quality.
+3. Preserve the original file as the source asset.
+4. Determine whether additional icon sizes can be generated from the uploaded source without visible quality loss.
+5. Do not use the screenshot from the previous message as the icon source. Use only the actual attached icon file.
+
+HOME SCREEN / APPLICATION HEADER
+
+Replace the current placeholder icon shown next to the “GeldStart” name on the application’s home/start screen with the uploaded GeldStart icon.
+
+Requirements:
+
+- replace only the current logo/icon element;
+- preserve the existing “GeldStart” text;
+- preserve the current header layout and spacing unless a minimal adjustment is needed for the new asset;
+- keep the icon visually aligned with the “GeldStart” wordmark;
+- preserve the icon’s aspect ratio;
+- do not stretch or crop the icon;
+- do not place another green background behind the icon if the uploaded icon already contains its own background;
+- do not add a second “G” or duplicate logo layer;
+- ensure the icon remains sharp on mobile and desktop;
+- use the current responsive design system;
+- add appropriate accessible alternative text or mark the image as decorative if the adjacent “GeldStart” text already provides the accessible name.
+
+If the same placeholder icon is reused in other application headers, replace it consistently only where it represents the GeldStart brand.
+
+Do not replace unrelated icons used for navigation, lessons, Depot categories, lock states, or buttons.
+
+WEB APP ICON / ADD TO HOME SCREEN
+
+Use the uploaded icon as the installable web-app icon when the user adds GeldStart to the smartphone home screen.
+
+Inspect whether the project already contains:
+
+- manifest.webmanifest;
+- manifest.json;
+- Vite PWA configuration;
+- Apple touch icon configuration;
+- favicon configuration;
+- index.html metadata;
+- metadata.json.
+
+Reuse the existing setup where possible.
+
+If no web app manifest currently exists, create the minimum valid manifest required for an installable web application.
+
+The manifest should contain values equivalent to:
+
+{
+  "name": "GeldStart",
+  "short_name": "GeldStart",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#07130d",
+  "theme_color": "#07130d",
+  "icons": [...]
+}
+
+Adapt the colors to the actual existing GeldStart theme if the project already defines more accurate theme values.
+
+ICON OUTPUTS
+
+Generate appropriate icon versions from the uploaded source where image quality permits.
+
+Preferred files:
+
+- favicon suitable for browser tabs;
+- Apple touch icon at 180 × 180;
+- web app icon at 192 × 192;
+- web app icon at 512 × 512;
+- optional maskable 512 × 512 icon only if the uploaded design has sufficient safe padding.
+
+Do not create a maskable icon by cutting off important parts of the logo.
+
+If the uploaded icon does not have enough safe padding for a maskable icon:
+
+- preserve the normal icon;
+- do not falsely mark it as maskable;
+- report this limitation.
+
+Use PNG for installable app icons unless the existing project has another correct established format.
+
+Keep the original uploaded asset as the source file.
+
+GITHUB PAGES PATH COMPATIBILITY
+
+The application is deployed under a GitHub Pages repository subpath.
+
+All icon, manifest, favicon, and Apple touch icon paths must work with the existing Vite BASE_URL.
+
+Do not rely on root-relative paths that would resolve incorrectly outside the repository path.
+
+Use the project’s existing Vite-compatible asset handling or BASE_URL-aware paths.
+
+Verify that the generated production build contains:
+
+- the web app manifest;
+- the favicon;
+- the Apple touch icon;
+- the 192 × 192 icon;
+- the 512 × 512 icon.
+
+HTML METADATA
+
+Update index.html or the existing metadata configuration with the appropriate references.
+
+Include or preserve:
+
+- favicon;
+- manifest;
+- Apple touch icon;
+- theme-color;
+- application name.
+
+Do not add duplicate metadata tags.
+
+Do not remove existing SEO or viewport metadata.
+
+INSTALLATION BEHAVIOR
+
+After installation or “Add to Home Screen”:
+
+- the home-screen icon must use the uploaded GeldStart icon;
+- the installed application name must display as “GeldStart”;
+- the application should open at the existing correct GitHub Pages base path;
+- the application should use standalone display mode if supported;
+- existing routes must continue working;
+- the icon must not revert to the old placeholder “G”.
+
+CACHE AND UPDATE HANDLING
+
+Because browsers and mobile operating systems aggressively cache favicons and web-app icons:
+
+- ensure the new icon filenames or manifest references are changed sufficiently to invalidate the old placeholder icon cache;
+- do not rely only on overwriting an old file with the same filename if that may preserve the old cached icon;
+- use clear stable filenames for the new final asset;
+- report that previously installed home-screen versions may need to be removed and reinstalled before the new icon becomes visible.
+
+DO NOT
+
+- generate a different logo;
+- preserve the existing placeholder “G” icon on the home screen;
+- use the previous screenshot as the icon asset;
+- distort the uploaded icon;
+- crop important parts of the uploaded icon;
+- add text inside the icon;
+- add Android/Capacitor files;
+- add native Android adaptive icon XML;
+- redesign the full home screen;
+- change the GeldStart wordmark;
+- modify unrelated navigation icons;
+- break the GitHub Pages repository base path.
+
+ICON VALIDATION
+
+Verify at these viewports:
+
+- 320 × 700;
+- 390 × 844;
+- 430 × 932;
+- 1440 × 900.
+
+Confirm:
+
+1. The uploaded icon replaces the old placeholder icon on the home/start screen.
+2. The icon is aligned correctly next to “GeldStart”.
+3. The icon is not stretched, cropped, duplicated, or blurry.
+4. The header continues fitting at 320 px width.
+5. The favicon resolves in the production build.
+6. The manifest resolves under the GitHub Pages base path.
+7. The Apple touch icon resolves.
+8. The 192 × 192 and 512 × 512 files exist in dist.
+9. The manifest contains the correct icon references.
+10. The installed application name is “GeldStart”.
+11. Existing routing, Depot, lessons, calculator, and navigation remain unchanged.
+
+FINAL REPORT ADDITION
+
+In the final implementation report, include:
+
+- the exact uploaded icon filename used as the source;
+- all generated icon filenames and dimensions;
+- the home-screen/header component modified;
+- the manifest file created or modified;
+- the favicon and Apple touch icon paths;
+- confirmation that GitHub Pages BASE_URL paths were tested;
+- confirmation that the old placeholder “G” was removed from the home/start screen;
+- whether a maskable icon could safely be generated;
+- any mobile icon caching or reinstallation limitation.
+
+PHASE 10: REMOVE DUPLICATE MARKET NOTICE
+
+Inspect the Depot header area.
+
+The current UI may display the market-data notice more than once:
+
+“Kursstand: letzter verfügbarer Börsenkurs. Die Kurse sind nicht zwingend in Echtzeit und dienen ausschließlich der Simulation.”
+
+Keep one clear primary notice.
+
+Do not repeat the same complete text immediately underneath unless the second instance provides different asset-specific information.
+
+Retain asset-specific stale/fallback messages where necessary.
+
+PHASE 11: TESTS
+
+Add or update tests for:
+
+HISTORICAL DATA
+
+- valid OHLC candle parsing;
+- invalid candle rejection;
+- high/low consistency;
+- chronological sorting;
+- duplicate-date removal;
+- previous history preservation after refresh failure;
+- stale history status;
+- static BASE_URL history path;
+- year minimum and maximum calculation;
+- one-year percentage change;
+- no fake candle rendering when history is unavailable.
+
+ASSET UX
+
+- selecting an asset expands its inline details;
+- selecting a second asset closes the first;
+- selected state and aria-expanded;
+- “Alle Details” moves the correct scroll container to the top;
+- reduced-motion behavior.
+
+LOCKED LAYOUT
+
+- locked explanation appears inside the lock/status block;
+- price and date remain separate;
+- no duplicate unlock explanation;
+- locked purchase remains impossible.
+
+ICON
+
+- final icon path resolves with the production Vite base path;
+- favicon or manifest references the correct asset where testable.
+
+REGRESSION
+
+- 5,000 EUR initial balance;
+- buying;
+- selling;
+- transaction history;
+- lesson unlock logic;
+- latest quote snapshot;
+- static GitHub Pages fallback priority;
+- existing lessons and calculators.
+
+PHASE 12: VISUAL VERIFICATION
+
+Verify with browser automation or the project’s existing browser test tooling.
+
+Required viewports:
+
+- 320 × 700;
+- 390 × 844;
+- 430 × 932;
+- 1440 × 900.
+
+Verify:
+
+1. No overlap in EUNL.DE, VWCE.DE, IEGA.DE, and 4GLD.DE rows.
+2. Locked explanation is below “Gesperrt”.
+3. Selecting EUNL.DE visibly expands details at EUNL.DE.
+4. The expanded panel is immediately discoverable.
+5. Only one asset is expanded.
+6. “Alle Details” opens at the top.
+7. Candlestick tooltip is usable by tap.
+8. Chart does not overflow horizontally.
+9. Bottom navigation does not cover expanded content.
+10. Existing buy/sell flow still works.
+11. No console errors.
+12. GitHub Pages static mode does not require server.ts.
+
+PHASE 13: BUILD AND DEPLOYMENT VALIDATION
+
+Run:
+
+- the existing unit tests;
+- type-check;
+- market latest-price snapshot;
+- historical snapshot if implemented;
+- production build.
+
+Verify:
+
+- dist/market-prices.json exists;
+- dist/market-history.json exists if historical support was implemented;
+- icon files exist in dist at the expected paths;
+- production BASE_URL paths are correct;
+- the existing GitHub Pages workflow remains valid.
+
+Do not claim historical market data was implemented if reliable source data could not be retrieved.
+
+If historical data is unavailable from the existing sources, state clearly:
+
+- which source or asset failed;
+- which endpoint was tested;
+- why the implementation was not safe or reliable;
+- which assets still use only latest-price information.
+
+FINAL RESPONSE FORMAT
+
+After implementation, report:
+
+1. Existing files modified.
+2. New files created and why.
+3. Whether reliable one-year OHLC history was available.
+4. Exact historical endpoints used, if any.
+5. Assets with working historical charts.
+6. Assets without historical data.
+7. Snapshot update behavior.
+8. Candlestick implementation details.
+9. Asset-selection UX changes.
+10. Locked-card layout changes.
+11. “Alle Details” scroll fix.
+12. Icon assets integrated and exact locations.
+13. Tests, viewports, type-check, and build results.
+14. Remaining prototype limitations.
+15. Whether the GitHub commit/push and Pages deployment completed.
+
+Do not return only a plan.
+
+Inspect and modify the existing GitHub-connected GeldStart workspace directly.

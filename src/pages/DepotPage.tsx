@@ -318,7 +318,9 @@ export function DepotPage() {
                 Kursdatum: {priceDateFormatted} ·{' '}
                 {hasFallbackQuotes
                   ? 'Demowerte (Ausgangsversion)'
-                  : providerStatus.statusLabel}
+                  : providerStatus.statusLabel === MARKET_DATA_SIMULATION_NOTICE
+                    ? 'Verzögerte Börsenkurse'
+                    : providerStatus.statusLabel}
               </span>
               <Info
                 className="h-3.5 w-3.5 text-[var(--depot-accent-lime)] shrink-0"
@@ -799,22 +801,26 @@ export function DepotPage() {
             <p className="text-[var(--depot-text-secondary)] leading-relaxed">
               Im Übungsdepot schaltest du neue Anlageklassen schrittweise durch abgeschlossene Lektionen frei:
             </p>
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2.5 sm:grid-cols-2">
               {DEMO_INSTRUMENTS.map((inst) => {
                 const unlocked = isInstrumentUnlocked(inst.symbol);
                 const q = resolveInstrumentQuote(inst.symbol);
+                const unlockHint =
+                  inst.unlockRequirementText ??
+                  inst.unlockReasonLabel ??
+                  'Freischaltung über Lernpfad';
                 return (
                   <div
                     key={inst.symbol}
                     data-testid={`catalogue-item-${inst.symbol}`}
-                    className={`rounded-xl border p-3 flex items-center justify-between gap-2 ${
+                    className={`rounded-xl border p-3 flex flex-col max-[359px]:items-stretch min-[360px]:flex-row min-[360px]:items-start justify-between gap-2.5 ${
                       unlocked
                         ? 'border-[var(--depot-border)] bg-[var(--depot-bg-secondary)]'
-                        : 'border-[var(--depot-border)]/60 bg-[var(--depot-bg-secondary)]/50 opacity-80'
+                        : 'border-[var(--depot-border)]/60 bg-[var(--depot-bg-secondary)]/50 opacity-85'
                     }`}
                   >
-                    <div className="min-w-0 space-y-0.5">
-                      <div className="flex items-center gap-1.5">
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         {unlocked ? (
                           <Unlock
                             className="h-3.5 w-3.5 text-[var(--depot-accent-lime)] shrink-0"
@@ -833,38 +839,55 @@ export function DepotPage() {
                           {inst.assetType}
                         </span>
                       </div>
-                      <div className="text-[var(--depot-text-secondary)] font-medium truncate">
+                      <div className="text-[var(--depot-text-secondary)] font-medium leading-snug break-words">
                         {inst.name}
                       </div>
-                      <div className="text-[10px] text-[var(--depot-text-muted)]">
-                        {inst.unlockRequirementText ?? inst.unlockReasonLabel ?? 'Sofort verfügbar'}
-                      </div>
-                    </div>
-
-                    <div className="text-right shrink-0 space-y-1">
-                      {q && (
-                        <div className="font-mono text-xs font-bold text-[var(--depot-text-primary)]">
-                          {formatEuro(
-                            q.priceEur && q.priceEur > 0 ? q.priceEur : q.price,
-                            2,
-                          )}
+                      {unlocked && (
+                        <div className="text-[10px] text-[var(--depot-text-muted)]">
+                          Sofort handelbar im Übungsdepot
                         </div>
                       )}
+                    </div>
+
+                    <div className="flex items-start justify-between min-[360px]:justify-end gap-2.5 shrink-0 max-[359px]:pt-2 max-[359px]:border-t max-[359px]:border-[var(--depot-border)]/60">
+                      {q && (
+                        <div className="min-[360px]:text-right shrink-0">
+                          <div className="font-mono text-xs font-bold tabular-nums text-[var(--depot-text-primary)] whitespace-nowrap">
+                            {formatEuro(
+                              q.priceEur && q.priceEur > 0 ? q.priceEur : q.price,
+                              2,
+                            )}
+                          </div>
+                          <div className="text-[10px] text-[var(--depot-text-muted)] whitespace-nowrap">
+                            Stand: {formatGermanDateLabel(q.marketTime ?? q.timestamp)}
+                          </div>
+                        </div>
+                      )}
+
                       {unlocked ? (
                         <button
                           type="button"
                           onClick={() => void handleOpenBuyForSymbol(inst.symbol)}
-                          className="text-[11px] font-bold text-[var(--depot-accent-lime)] hover:underline"
+                          className="depot-btn-lime inline-flex min-h-[34px] items-center justify-center rounded-lg px-2.5 py-1 text-[11px] font-bold shrink-0"
                         >
                           Kaufen →
                         </button>
                       ) : (
-                        <AppLink
-                          to="/lernen"
-                          className="text-[11px] font-semibold text-[var(--depot-text-muted)] hover:text-[var(--depot-accent-lime)] underline"
-                        >
-                          Lektion öffnen
-                        </AppLink>
+                        <div className="flex flex-col min-[360px]:items-end gap-1 max-w-[165px]">
+                          <span className="inline-flex min-h-[28px] items-center justify-center gap-1 rounded-lg border border-[var(--depot-border)] bg-[var(--depot-bg-primary)]/50 px-2.5 py-0.5 text-[11px] font-semibold text-[var(--depot-text-muted)] whitespace-nowrap">
+                            <Lock className="h-3 w-3 shrink-0" aria-hidden="true" />
+                            <span>Gesperrt</span>
+                          </span>
+                          <span className="text-[10px] text-[var(--depot-text-muted)] min-[360px]:text-right leading-tight break-words">
+                            {unlockHint}
+                          </span>
+                          <AppLink
+                            to="/lernen"
+                            className="text-[10px] font-semibold text-[var(--depot-accent-lime)] hover:underline"
+                          >
+                            Lektion öffnen →
+                          </AppLink>
+                        </div>
                       )}
                     </div>
                   </div>

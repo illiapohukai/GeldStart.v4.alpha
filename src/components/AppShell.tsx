@@ -82,11 +82,25 @@ const DESKTOP_NAV_ITEMS: NavItem[] = [
   },
 ];
 
+export function resolveAppIconUrl(baseUrl?: string): string {
+  const rawBase =
+    typeof baseUrl === 'string' && baseUrl.length > 0
+      ? baseUrl
+      : typeof import.meta !== 'undefined' &&
+          import.meta.env &&
+          typeof import.meta.env.BASE_URL === 'string'
+        ? import.meta.env.BASE_URL
+        : '/';
+  const normalizedBase = rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
+  return `${normalizedBase}geldstart-icon-192.png`;
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { path } = useAppRouter();
   const { recommendedLesson, recommendedResumeInfo } = useProgress();
   const isLessonView = Boolean(getLessonByRoute(path));
   const isDepotView = path === '/depot';
+  const appIconSrc = resolveAppIconUrl();
 
   // Synchronously keep root document classes aligned to avoid any white flash on /depot reload
   if (typeof document !== 'undefined') {
@@ -108,15 +122,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     >
       {/* Clean Top Bar: Wordmark, primary nav links, 1 primary action */}
       <header className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur-md theme-shell-transition">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 sm:gap-4 px-3.5 py-2.5 sm:px-6 sm:py-3">
           <AppLink
             to="/"
-            className="group flex items-center gap-2.5 focus:outline-none depot-focus rounded-xl"
+            className="group flex items-center gap-2 sm:gap-2.5 focus:outline-none depot-focus rounded-xl shrink-0"
             aria-label="GeldStart Startseite"
           >
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground font-display font-extrabold text-lg shadow-xs">
-              G
-            </span>
+            <img
+              src={appIconSrc}
+              alt=""
+              aria-hidden="true"
+              width={36}
+              height={36}
+              data-testid="geldstart-brand-icon"
+              className="h-9 w-9 shrink-0 rounded-xl object-contain shadow-xs select-none"
+            />
             <div className="flex items-center gap-2">
               <span className="font-display text-lg font-extrabold tracking-tight text-foreground">
                 GeldStart

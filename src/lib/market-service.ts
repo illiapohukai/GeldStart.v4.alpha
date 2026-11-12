@@ -2,13 +2,17 @@ import {
   CURATED_MARKET_ASSETS,
   DEMO_STATUS_LABEL,
   getDemoExchangeRate,
-  getDemoHistoricalSeries,
   getDemoInstrumentMetadata,
   getDemoQuote,
   searchDemoInstruments,
 } from './market-demo-adapter';
-import { parseStaticMarketSnapshot } from './market-providers';
+import {
+  normalizeAndValidateCandles,
+  parseMarketHistorySnapshot,
+  parseStaticMarketSnapshot,
+} from './market-providers';
 import type {
+  AssetHistory,
   ExchangeRateQuote,
   HistoricalRange,
   HistoricalSeries,
@@ -16,6 +20,7 @@ import type {
   InstrumentMetadata,
   MarketDataService,
   MarketDataStatus,
+  MarketHistorySnapshot,
   MarketQuote,
   MarketServiceErrorCode,
   NormalizedQuoteStatus,
@@ -31,6 +36,12 @@ export const MARKET_DATA_SIMULATION_NOTICE =
 
 export const FALLBACK_QUOTE_NOTICE =
   'Demowert aus der Ausgangsversion, kein aktueller Börsenkurs.';
+
+export const UNAVAILABLE_HISTORY_NOTICE =
+  'Für dieses Wertpapier stehen in der Prototyp-Version keine verlässlichen historischen Kursdaten zur Verfügung.';
+
+export const HISTORICAL_NO_FORECAST_NOTICE =
+  'Historische Kursentwicklung, keine Prognose.';
 
 export function getDefaultStaticSnapshotUrl(): string {
   const baseUrl =
@@ -48,6 +59,24 @@ export function resolveStaticSnapshotUrl(baseUrl?: string): string {
     return `${normalizedBase}market-prices.json`;
   }
   return getDefaultStaticSnapshotUrl();
+}
+
+export function getDefaultStaticHistorySnapshotUrl(): string {
+  const baseUrl =
+    typeof import.meta !== 'undefined' &&
+    import.meta.env &&
+    typeof import.meta.env.BASE_URL === 'string'
+      ? import.meta.env.BASE_URL
+      : '/';
+  return `${baseUrl}market-history.json`;
+}
+
+export function resolveStaticHistorySnapshotUrl(baseUrl?: string): string {
+  if (typeof baseUrl === 'string' && baseUrl.length > 0) {
+    const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+    return `${normalizedBase}market-history.json`;
+  }
+  return getDefaultStaticHistorySnapshotUrl();
 }
 
 export function formatStaleQuoteNotice(marketTimeOrDate?: string | null): string {
@@ -147,6 +176,8 @@ export function formatMarketDataStatusBadge(
 const CATALOGUE_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes client-side shared snapshot TTL
 let sharedCatalogueSnapshot: { data: SharedQuoteCache; fetchedAtMs: number } | null = null;
 let pendingCataloguePromise: Promise<SharedQuoteCache> | null = null;
+let sharedHistorySnapshot: { data: MarketHistorySnapshot; fetchedAtMs: number } | null = null;
+let pendingHistoryPromise: Promise<MarketHistorySnapshot | null> | null = null;
 const quoteCache = new Map<string, { quote: MarketQuote; fetchedAtMs: number }>();
 const fxCache = new Map<string, { fx: ExchangeRateQuote; fetchedAtMs: number }>();
 let cachedProviderStatus: ProviderStatusInfo | null = null;
@@ -154,6 +185,8 @@ let cachedProviderStatus: ProviderStatusInfo | null = null;
 export function clearMarketClientCache(): void {
   sharedCatalogueSnapshot = null;
   pendingCataloguePromise = null;
+  sharedHistorySnapshot = null;
+  pendingHistoryPromise = null;
   quoteCache.clear();
   fxCache.clear();
   cachedProviderStatus = null;
@@ -266,6 +299,7 @@ class DefaultMarketDataService implements MarketDataService {
   private readonly customBaseUrl?: string;
   private readonly usesGlobalCache: boolean;
   private localSnapshot: { data: SharedQuoteCache; fetchedAtMs: number } | null = null;
+  private localHistorySnapshot: { data: MarketHistorySnapshot; fetchedAtMs: number } | null = null;
   private localProviderStatus: ProviderStatusInfo | null = null;
 
   constructor(options?: MarketServiceConfigOptions) {
@@ -283,6 +317,17 @@ class DefaultMarketDataService implements MarketDataService {
       typeof import.meta.env.BASE_URL === 'string'
       ? `${import.meta.env.BASE_URL}market-prices.json`
       : '/market-prices.json';
+  }
+
+  private getHistorySnapshotUrl(): string {
+    if (typeof this.customBaseUrl === 'string' && this.customBaseUrl.length > 0) {
+      return resolveStaticHistorySnapshotUrl(this.customBaseUrl);
+    }
+    return typeof import.meta !== 'undefined' &&
+      import.meta.env &&
+      typeof import.meta.env.BASE_URL === 'string'
+      ? `${import.meta.env.BASE_URL}market-history.json`
+      : '/market-history.json';
   }
 
   public setSimulatedErrorState(code: MarketServiceErrorCode | null): void {
@@ -524,35 +569,201 @@ class DefaultMarketDataService implements MarketDataService {
     return result;
   }
 
+  async getHistorySnapshot(options?: {
+    forceRefresh?: boolean;
+  }): Promise<MarketHistorySnapshot | null> {
+    this.checkSimulatedError();
+    const now = Date.now();
+    const currentCached = this.usesGlobalCache
+      ? sharedHistorySnapshot
+      : this.localHistorySnapshot;
+
+    if (
+      !options?.forceRefresh &&
+      currentCached &&
+      now - currentCached.fetchedAtMs < CATALOGUE_CACHE_TTL_MS
+    ) {
+      return currentCached.data;
+    }
+
+    if (this.usesGlobalCache && !options?.forceRefresh && pendingHistoryPromise) {
+      return pendingHistoryPromise;
+    }
+
+    const loadTask = (async (): Promise<MarketHistorySnapshot | null> => {
+      // Priority A: Same-origin /api/market/history when available in AI Studio or local full-stack dev
+      try {
+        const apiRes = await this.fetchImpl('/api/market/history', {
+          headers: { Accept: 'application/json' },
+        });
+        if (apiRes.ok) {
+          const parsed = parseMarketHistorySnapshot(await apiRes.json());
+          if (parsed && parsed.histories.length > 0) {
+            if (this.usesGlobalCache) {
+              sharedHistorySnapshot = { data: parsed, fetchedAtMs: Date.now() };
+            } else {
+              this.localHistorySnapshot = {
+                data: parsed,
+                fetchedAtMs: Date.now(),
+              };
+            }
+            return parsed;
+          }
+        }
+      } catch {
+        // Fall through to Priority B (static market-history.json)
+      }
+
+      // Priority B: Static snapshot (`${import.meta.env.BASE_URL}market-history.json`)
+      try {
+        const historyUrl = this.getHistorySnapshotUrl();
+        const staticRes = await this.fetchImpl(historyUrl, {
+          headers: { Accept: 'application/json' },
+        });
+        if (staticRes.ok) {
+          const parsed = parseMarketHistorySnapshot(await staticRes.json());
+          if (parsed) {
+            if (this.usesGlobalCache) {
+              sharedHistorySnapshot = { data: parsed, fetchedAtMs: Date.now() };
+            } else {
+              this.localHistorySnapshot = {
+                data: parsed,
+                fetchedAtMs: Date.now(),
+              };
+            }
+            return parsed;
+          }
+        }
+      } catch {
+        // Fall through
+      }
+
+      if (currentCached) {
+        return currentCached.data;
+      }
+
+      return null;
+    })();
+
+    if (!this.usesGlobalCache) {
+      return loadTask;
+    }
+
+    pendingHistoryPromise = loadTask;
+    try {
+      return await pendingHistoryPromise;
+    } finally {
+      pendingHistoryPromise = null;
+    }
+  }
+
+  async getAssetHistory(symbol: string): Promise<AssetHistory | null> {
+    this.checkSimulatedError();
+    const normalized = symbol.trim().toUpperCase();
+    const meta = getDemoInstrumentMetadata(normalized);
+    if (!meta) return null;
+
+    const snapshot = await this.getHistorySnapshot();
+    const found = snapshot?.histories.find(
+      (h) => h.assetId.toUpperCase() === normalized || h.assetId.toUpperCase() === meta.id.toUpperCase(),
+    );
+
+    if (found) {
+      const validCandles = normalizeAndValidateCandles(found.candles);
+      return {
+        ...found,
+        candles: validCandles,
+        status:
+          validCandles.length === 0
+            ? 'unavailable'
+            : found.status === 'stale'
+              ? 'stale'
+              : 'available',
+      };
+    }
+
+    return {
+      assetId: meta.id,
+      currency: meta.currency,
+      priceCurrency: meta.quoteCurrency,
+      source:
+        meta.source === 'nasdaq-prototype'
+          ? 'nasdaq-prototype'
+          : 'boerse-frankfurt-prototype',
+      range: '1Y',
+      interval: '1D',
+      generatedAt: new Date().toISOString(),
+      candles: [],
+      status: 'unavailable',
+    };
+  }
+
   async getHistoricalPrices(
     symbol: string,
     range: HistoricalRange,
   ): Promise<HistoricalSeries> {
     this.checkSimulatedError();
     const normalized = symbol.trim().toUpperCase();
-    const status = await this.getProviderStatus();
-
-    if (status.mode === 'live_provider') {
-      try {
-        const res = await this.fetchImpl(
-          `/api/market/history?symbol=${encodeURIComponent(normalized)}&range=${encodeURIComponent(range)}`,
-        );
-        if (res.ok) {
-          return (await res.json()) as HistoricalSeries;
-        }
-      } catch {
-        // Fallback to local educational history anchored to current cached quote
-      }
-    }
-
-    const demoHistory = getDemoHistoricalSeries(normalized, range);
-    if (!demoHistory) {
+    const meta = getDemoInstrumentMetadata(normalized);
+    if (!meta) {
       throw new MarketServiceException(
         'UNSUPPORTED_SYMBOL',
-        `Keine Beispiel-Historie für „${normalized}“ verfügbar.`,
+        `Keine Historie für „${normalized}“ verfügbar.`,
       );
     }
-    return demoHistory;
+
+    const assetHistory = await this.getAssetHistory(normalized);
+    if (
+      !assetHistory ||
+      assetHistory.status === 'unavailable' ||
+      assetHistory.candles.length === 0
+    ) {
+      return {
+        symbol: meta.symbol,
+        currency: meta.currency,
+        range,
+        points: [],
+        candles: [],
+        status: 'unavailable',
+        providerName: UNAVAILABLE_HISTORY_NOTICE,
+        timestamp: new Date().toISOString(),
+        isDemo: false,
+      };
+    }
+
+    const allCandles = assetHistory.candles;
+    let filteredCandles = allCandles;
+    if (allCandles.length > 0 && range !== '1Y') {
+      const lastDate = allCandles[allCandles.length - 1]!.date;
+      const lastMs = Date.parse(`${lastDate}T00:00:00Z`);
+      const daysBack = range === '1M' ? 32 : 185;
+      const cutoffDate = new Date(lastMs - daysBack * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10);
+      filteredCandles = allCandles.filter((c) => c.date >= cutoffDate);
+    }
+
+    return {
+      symbol: meta.symbol,
+      currency: assetHistory.priceCurrency,
+      range,
+      points: filteredCandles.map((c) => ({
+        date: c.date,
+        close: c.close,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        volume: c.volume,
+      })),
+      candles: filteredCandles,
+      status: assetHistory.status === 'stale' ? 'stale' : 'delayed',
+      providerName:
+        assetHistory.source === 'nasdaq-prototype'
+          ? 'Nasdaq Prototyp-Tageskurse (1 Jahr)'
+          : 'Börse Frankfurt (XETRA) Prototyp-Tageskurse (1 Jahr)',
+      timestamp: assetHistory.generatedAt,
+      isDemo: false,
+    };
   }
 
   async getExchangeRate(

@@ -56,12 +56,21 @@ import {
   isAssetUnlocked,
 } from '../lib/market-demo-adapter';
 import {
+  computeHistoricalSummaryStats,
   fetchBoerseFrankfurtPrototypeQuote,
   fetchFrankfurterUsdToEurRate,
   fetchNasdaqPrototypeQuote,
+  generateMarketHistorySnapshot,
   generateStaticMarketSnapshot,
   InMemoryMarketPriceRepository,
+  isValidHistoricalCandle,
+  mergeAndTrimHistoricalCandles,
+  normalizeAndValidateCandles,
+  normalizeHistoricalDate,
+  parseBoerseFrankfurtHistoricalPayload,
   parseBoerseFrankfurtSseEvent,
+  parseMarketHistorySnapshot,
+  parseNasdaqHistoricalPayload,
   parseNasdaqPrice,
   parseNasdaqQuotePayload,
   parseStaticMarketSnapshot,
@@ -72,11 +81,14 @@ import {
   FALLBACK_QUOTE_NOTICE,
   formatMarketDataStatusBadge,
   formatStaleQuoteNotice,
+  HISTORICAL_NO_FORECAST_NOTICE,
   MARKET_DATA_SIMULATION_NOTICE,
+  resolveStaticHistorySnapshotUrl,
   resolveStaticSnapshotUrl,
+  UNAVAILABLE_HISTORY_NOTICE,
   VIRTUAL_DEPOT_NOTICE,
 } from '../lib/market-service';
-import type { MarketAsset, MarketQuote } from '../lib/market-types';
+import type { HistoricalCandle, MarketAsset, MarketQuote } from '../lib/market-types';
 import { computeProgressStats } from '../lib/progress-context';
 import {
   createInitialProgressState,
@@ -89,6 +101,9 @@ import {
   sanitizeProgressState,
   saveLessonStepState,
 } from '../lib/storage';
+import { resolveAppIconUrl } from '../components/AppShell';
+import { scrollToDetailTop } from '../components/depot/AssetDetailView';
+import { toggleExpandedAssetSymbol } from '../components/depot/VirtualTradeSheet';
 import { resolveViteBasePath } from '../../vite.config';
 
 describe('Compound Interest & Inflation Calculator (Pure Math)', () => {
@@ -1303,4 +1318,288 @@ describe('Static GitHub Actions Market Snapshot & Frontend 3-Tier Priority', () 
     assert.equal(statusC.mode, 'demo');
   });
 });
+
+describe('Phase 11: 1-Year Daily OHLC Historical Data, Candlestick Summary, UX & App Icon', () => {
+  it('1, 2 & 3. parses valid candles, rejects invalid candles, and enforces OHLC high/low consistency', () => {
+    assert.equal(normalizeHistoricalDate('2026-11-11'), '2026-11-11');
+    assert.equal(normalizeHistoricalDate('11/05/2026'), '2026-11-05');
+    assert.equal(normalizeHistoricalDate('invalid-date'), null);
+
+    const validCandle: HistoricalCandle = {
+      date: '2026-11-11',
+      open: 100,
+      high: 105,
+      low: 98,
+      close: 103,
+      volume: 12500,
+    };
+    assert.equal(isValidHistoricalCandle(validCandle), true);
+
+    // Invalid: open <= 0
+    assert.equal(
+      isValidHistoricalCandle({ ...validCandle, open: 0 }),
+      false,
+    );
+    // Invalid: high < open
+    assert.equal(
+      isValidHistoricalCandle({ ...validCandle, open: 106, high: 105 }),
+      false,
+    );
+    // Invalid: high < close
+    assert.equal(
+      isValidHistoricalCandle({ ...validCandle, close: 106, high: 105 }),
+      false,
+    );
+    // Invalid: low > open
+    assert.equal(
+      isValidHistoricalCandle({ ...validCandle, open: 97, low: 98 }),
+      false,
+    );
+    // Invalid: low > close
+    assert.equal(
+      isValidHistoricalCandle({ ...validCandle, close: 97, low: 98 }),
+      false,
+    );
+    // Invalid: negative volume
+    assert.equal(
+      isValidHistoricalCandle({ ...validCandle, volume: -10 }),
+      false,
+    );
+
+    // Nasdaq payload parser
+    const nasdaqCandles = parseNasdaqHistoricalPayload(
+      {
+        data: {
+          tradesTable: {
+            rows: [
+              {
+                date: '11/10/2026',
+                open: '$220.00',
+                high: '$225.50',
+                low: '$218.00',
+                close: '$224.00',
+                volume: '45,123,000',
+              },
+              {
+                date: '11/11/2026',
+                open: '$224.00',
+                high: '$210.00', // invalid: high < open
+                low: '$215.00',
+                close: '$220.00',
+                volume: '10,000',
+              },
+            ],
+          },
+        },
+      },
+      'AAPL',
+    );
+    assert.equal(nasdaqCandles.length, 1);
+    assert.equal(nasdaqCandles[0]?.date, '2026-11-10');
+    assert.equal(nasdaqCandles[0]?.close, 224);
+    assert.equal(nasdaqCandles[0]?.volume, 45123000);
+
+    // Börse Frankfurt TradingView history payload parser
+    const bfCandles = parseBoerseFrankfurtHistoricalPayload(
+      {
+        s: 'ok',
+        t: [1762732800, 1762819200], // 2025-11-10, 2025-11-11 UTC
+        o: [110.5, 111.2],
+        h: [112.0, 113.5],
+        l: [109.8, 110.9],
+        c: [111.4, 113.1],
+        v: [5000, 6200],
+      },
+      'IE00B4L5Y983',
+    );
+    assert.equal(bfCandles.length, 2);
+    assert.equal(bfCandles[0]?.open, 110.5);
+    assert.equal(bfCandles[1]?.close, 113.1);
+  });
+
+  it('4, 5 & 6. sorts chronologically, deduplicates dates, merges incremental updates, and computes 1-year summary stats', () => {
+    const rawCandles: HistoricalCandle[] = [
+      { date: '2026-11-11', open: 110, high: 115, low: 108, close: 114 },
+      { date: '2025-11-12', open: 95, high: 102, low: 92, close: 100 },
+      { date: '2026-05-01', open: 102, high: 120, low: 99, close: 118 },
+      // Duplicate date 2026-11-11 with updated close
+      { date: '2026-11-11', open: 110, high: 116, low: 108, close: 115, volume: 900 },
+    ];
+
+    const normalized = normalizeAndValidateCandles(rawCandles);
+    assert.equal(normalized.length, 3);
+    assert.deepEqual(
+      normalized.map((c) => c.date),
+      ['2025-11-12', '2026-05-01', '2026-11-11'],
+    );
+    assert.equal(normalized[2]?.close, 115, 'Should keep latest valid entry for duplicate date');
+
+    const stats = computeHistoricalSummaryStats(normalized);
+    assert.ok(stats);
+    assert.equal(stats.firstClose, 100);
+    assert.equal(stats.latestClose, 115);
+    assert.equal(stats.minLow, 92);
+    assert.equal(stats.maxHigh, 120);
+    assert.equal(stats.changeAbsolute, 15);
+    assert.equal(stats.changePercent, 15);
+    assert.equal(stats.candleCount, 3);
+
+    const merged = mergeAndTrimHistoricalCandles(
+      normalized,
+      [{ date: '2026-11-12', open: 115, high: 119, low: 114, close: 118 }],
+      370,
+    );
+    assert.equal(merged.length, 4);
+    assert.equal(merged[3]?.date, '2026-11-12');
+  });
+
+  it('7, 8 & 9. preserves previous history as stale on failure, loads BASE_URL market-history.json, and never fabricates candles when unavailable', async () => {
+    assert.equal(resolveStaticHistorySnapshotUrl('/'), '/market-history.json');
+    assert.equal(
+      resolveStaticHistorySnapshotUrl('/easy-investieren/'),
+      '/easy-investieren/market-history.json',
+    );
+    assert.equal(
+      resolveStaticHistorySnapshotUrl('/easy-investieren'),
+      '/easy-investieren/market-history.json',
+    );
+
+    const eunlAsset = CURATED_MARKET_ASSETS.find((a) => a.id === 'EUNL.DE')!;
+    const aaplAsset = CURATED_MARKET_ASSETS.find((a) => a.id === 'AAPL')!;
+
+    // Day 1: EUNL.DE succeeds, AAPL fails (no previous history -> unavailable with 0 candles)
+    const day1History = await generateMarketHistorySnapshot({
+      assets: [eunlAsset, aaplAsset],
+      nowFn: () => new Date('2026-11-11T21:30:00.000Z'),
+      fetchFn: async (input) => {
+        const url = String(input);
+        if (url.includes('tradingview/history')) {
+          return new Response(
+            JSON.stringify({
+              s: 'ok',
+              t: [1762732800, 1762819200],
+              o: [128.0, 129.5],
+              h: [130.0, 131.2],
+              l: [127.5, 129.0],
+              c: [129.5, 130.73],
+              v: [1000, 1500],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response('Upstream Error', { status: 503 });
+      },
+    });
+
+    const eunlDay1 = day1History.histories.find((h) => h.assetId === 'EUNL.DE')!;
+    const aaplDay1 = day1History.histories.find((h) => h.assetId === 'AAPL')!;
+    assert.equal(eunlDay1.status, 'available');
+    assert.equal(eunlDay1.candles.length, 2);
+    assert.equal(aaplDay1.status, 'unavailable');
+    assert.equal(aaplDay1.candles.length, 0, 'Must never fabricate or interpolate candles');
+
+    // Day 2: Complete outage -> EUNL.DE preserved as stale, AAPL remains unavailable with 0 candles
+    const day2History = await generateMarketHistorySnapshot({
+      assets: [eunlAsset, aaplAsset],
+      previousHistorySnapshot: day1History,
+      nowFn: () => new Date('2026-11-12T21:30:00.000Z'),
+      fetchFn: async () => new Response('Complete Outage', { status: 503 }),
+    });
+
+    const eunlDay2 = day2History.histories.find((h) => h.assetId === 'EUNL.DE')!;
+    const aaplDay2 = day2History.histories.find((h) => h.assetId === 'AAPL')!;
+    assert.equal(eunlDay2.status, 'stale');
+    assert.equal(eunlDay2.candles.length, 2);
+    assert.equal(eunlDay2.candles[1]?.close, 130.73);
+    assert.equal(aaplDay2.status, 'unavailable');
+    assert.equal(aaplDay2.candles.length, 0);
+
+    const reparsed = parseMarketHistorySnapshot(JSON.parse(JSON.stringify(day2History)));
+    assert.ok(reparsed);
+    assert.equal(reparsed.histories.length, 2);
+
+    // Service loads static snapshot via BASE_URL when /api/market/history is unavailable
+    const requestedUrls: string[] = [];
+    const service = createMarketDataService({
+      baseUrl: '/easy-investieren/',
+      fetchFn: async (input) => {
+        const url = String(input);
+        requestedUrls.push(url);
+        if (url === '/easy-investieren/market-history.json') {
+          return new Response(JSON.stringify(day2History), { status: 200 });
+        }
+        return new Response('Not Found', { status: 404 });
+      },
+    });
+
+    const loadedEunl = await service.getAssetHistory('EUNL.DE');
+    assert.ok(loadedEunl);
+    assert.equal(loadedEunl.status, 'stale');
+    assert.equal(loadedEunl.candles.length, 2);
+    assert.ok(requestedUrls.includes('/easy-investieren/market-history.json'));
+
+    const loadedAapl = await service.getAssetHistory('AAPL');
+    assert.ok(loadedAapl);
+    assert.equal(loadedAapl.status, 'unavailable');
+    assert.equal(loadedAapl.candles.length, 0);
+    assert.ok(
+      UNAVAILABLE_HISTORY_NOTICE.includes(
+        'Für dieses Wertpapier stehen in der Prototyp-Version keine verlässlichen historischen Kursdaten zur Verfügung.',
+      ),
+    );
+    assert.equal(
+      HISTORICAL_NO_FORECAST_NOTICE,
+      'Historische Kursentwicklung, keine Prognose.',
+    );
+  });
+
+  it('10, 11, 12 & 13. tests inline asset row expansion toggle, scrollToDetailTop with reduced motion, and app icon BASE_URL path', () => {
+    // 10 & 11: Expanding/collapsing an asset row & closing previous when selecting another
+    let expanded: string | null = null;
+    expanded = toggleExpandedAssetSymbol(expanded, 'EUNL.DE');
+    assert.equal(expanded, 'EUNL.DE');
+
+    // Selecting another asset closes EUNL.DE and opens SAP.DE
+    expanded = toggleExpandedAssetSymbol(expanded, 'SAP.DE');
+    assert.equal(expanded, 'SAP.DE');
+
+    // Tapping SAP.DE again collapses it
+    expanded = toggleExpandedAssetSymbol(expanded, 'SAP.DE');
+    assert.equal(expanded, null);
+
+    // 12: scrollToDetailTop respects prefers-reduced-motion
+    const scrollCalls: ScrollToOptions[] = [];
+    scrollToDetailTop({
+      prefersReducedMotion: false,
+      scrollFn: (opts) => {
+        scrollCalls.push(opts);
+      },
+    });
+    assert.equal(scrollCalls.length, 1);
+    assert.equal(scrollCalls[0]?.top, 0);
+    assert.equal(scrollCalls[0]?.behavior, 'smooth');
+
+    scrollToDetailTop({
+      prefersReducedMotion: true,
+      scrollFn: (opts) => {
+        scrollCalls.push(opts);
+      },
+    });
+    assert.equal(scrollCalls.length, 2);
+    assert.equal(scrollCalls[1]?.top, 0);
+    assert.equal(scrollCalls[1]?.behavior, 'auto');
+
+    // 13: App icon BASE_URL path resolution
+    assert.equal(resolveAppIconUrl('/'), '/geldstart-icon-192.png');
+    assert.equal(
+      resolveAppIconUrl('/easy-investieren/'),
+      '/easy-investieren/geldstart-icon-192.png',
+    );
+    assert.equal(
+      resolveAppIconUrl('/easy-investieren'),
+      '/easy-investieren/geldstart-icon-192.png',
+    );
+  });
+});
+
 

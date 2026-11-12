@@ -1,21 +1,22 @@
 import dotenv from 'dotenv';
 import express from 'express';
+import { readFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import {
   DEMO_STATUS_LABEL,
-  getDemoHistoricalSeries,
   searchDemoInstruments,
 } from './src/lib/market-demo-adapter';
 import {
   getCuratedAssetByIdentifier,
+  parseMarketHistorySnapshot,
   sharedQuoteCoordinator,
 } from './src/lib/market-providers';
 import type {
   ExchangeRateQuote,
-  HistoricalRange,
   MarketDataStatus,
+  MarketHistorySnapshot,
   ProviderStatusInfo,
   SharedQuoteCache,
 } from './src/lib/market-types';
@@ -57,7 +58,9 @@ function buildProviderStatusFromCache(
       ? DEMO_STATUS_LABEL
       : 'Prototyp-Kursdaten (Nasdaq / Börse Frankfurt / Frankfurter)',
     defaultStatus,
-    statusLabel: allFallback ? DEMO_STATUS_LABEL : PROTOTYPE_MARKET_NOTICE,
+    statusLabel: allFallback
+      ? DEMO_STATUS_LABEL
+      : 'Verzögerte Börsenkurse (Börse Frankfurt / Nasdaq / EZB-Wechselkurs)',
     disclaimerLabel:
       'Virtuelles Übungsdepot – keine echten Käufe. Nur zu Bildungszwecken, keine Anlageberatung.',
     lastCheckedAt: cache.fetchedAt,
@@ -169,18 +172,36 @@ async function startServer() {
     }
   });
 
-  // 5. Historical Series Endpoint (Anchored to cached quote)
+  // 5. Historical OHLC Snapshot Endpoint (Served from public/market-history.json)
+  let cachedHistorySnapshot: MarketHistorySnapshot | null = null;
   app.get('/api/market/history', async (req, res) => {
+    try {
+      if (!cachedHistorySnapshot) {
+        const historyPath = path.join(__dirname, 'public', 'market-history.json');
+        const raw = await readFile(historyPath, 'utf-8');
+        cachedHistorySnapshot = parseMarketHistorySnapshot(JSON.parse(raw));
+      }
+    } catch {
+      cachedHistorySnapshot = null;
+    }
+
+    if (!cachedHistorySnapshot) {
+      res.status(404).json({
+        error:
+          'Für dieses Wertpapier stehen in der Prototyp-Version keine verlässlichen historischen Kursdaten zur Verfügung.',
+      });
+      return;
+    }
+
     const symbol =
       typeof req.query.symbol === 'string'
         ? req.query.symbol.trim().toUpperCase()
         : '';
-    const range: HistoricalRange =
-      req.query.range === '1M' ||
-      req.query.range === '6M' ||
-      req.query.range === '1Y'
-        ? req.query.range
-        : '1Y';
+
+    if (!symbol) {
+      res.json(cachedHistorySnapshot);
+      return;
+    }
 
     const curatedAsset = getCuratedAssetByIdentifier(symbol);
     if (!curatedAsset) {
@@ -188,23 +209,21 @@ async function startServer() {
       return;
     }
 
-    const cache = await sharedQuoteCoordinator.getSharedQuotes();
-    const quote = cache.quotes[curatedAsset.id.toUpperCase()];
-    const series = getDemoHistoricalSeries(
-      curatedAsset.id,
-      range,
-      quote?.price,
+    const found = cachedHistorySnapshot.histories.find(
+      (h) =>
+        h.assetId.toUpperCase() === curatedAsset.id.toUpperCase() ||
+        h.assetId.toUpperCase() === symbol,
     );
-    if (!series) {
-      res.status(404).json({ error: 'No historical series available' });
+
+    if (!found) {
+      res.status(404).json({
+        error:
+          'Für dieses Wertpapier stehen in der Prototyp-Version keine verlässlichen historischen Kursdaten zur Verfügung.',
+      });
       return;
     }
 
-    res.json({
-      ...series,
-      status: quote?.status ?? 'fallback',
-      isDemo: quote?.status === 'fallback',
-    });
+    res.json(found);
   });
 
   // 6. Exchange Rate Endpoint (Served from the shared daily cache)

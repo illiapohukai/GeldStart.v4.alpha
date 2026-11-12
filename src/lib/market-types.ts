@@ -164,6 +164,52 @@ export interface StaticMarketSnapshot extends SharedQuoteCache {
 export interface HistoricalPricePoint {
   date: string;
   close: number;
+  open?: number;
+  high?: number;
+  low?: number;
+  volume?: number | null;
+}
+
+export interface HistoricalCandle {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number | null;
+}
+
+export type HistoricalDataSource =
+  | 'nasdaq-prototype'
+  | 'boerse-frankfurt-prototype';
+
+export interface AssetHistory {
+  assetId: string;
+  currency: 'EUR' | 'USD';
+  priceCurrency: 'EUR' | 'USD';
+  source: HistoricalDataSource;
+  range: '1Y';
+  interval: '1D';
+  generatedAt: string;
+  candles: HistoricalCandle[];
+  status: 'available' | 'stale' | 'unavailable';
+}
+
+export interface MarketHistorySnapshot {
+  generatedAt: string;
+  histories: AssetHistory[];
+}
+
+export interface HistoricalSummaryStats {
+  minLow: number;
+  maxHigh: number;
+  firstClose: number;
+  latestClose: number;
+  changeAbsolute: number;
+  changePercent: number;
+  startDate: string;
+  endDate: string;
+  candleCount: number;
 }
 
 export type HistoricalRange = '1M' | '6M' | '1Y';
@@ -173,6 +219,7 @@ export interface HistoricalSeries {
   currency: SupportedCurrency;
   range: HistoricalRange;
   points: HistoricalPricePoint[];
+  candles?: HistoricalCandle[];
   status: MarketDataStatus;
   providerName: string;
   timestamp: string;
@@ -256,6 +303,10 @@ export interface MarketDataService {
     symbol: string,
     range: HistoricalRange,
   ): Promise<HistoricalSeries>;
+  getAssetHistory(symbol: string): Promise<AssetHistory | null>;
+  getHistorySnapshot(options?: {
+    forceRefresh?: boolean;
+  }): Promise<MarketHistorySnapshot | null>;
   getExchangeRate(
     from: SupportedCurrency,
     to: SupportedCurrency,

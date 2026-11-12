@@ -51,8 +51,13 @@ jobs:
         run: |
           test -f dist/index.html
           test -f dist/404.html
-          test -f dist/favicon.svg
+          test -f dist/site.webmanifest
+          test -f dist/geldstart-icon-192.png
+          test -f dist/geldstart-icon-512.png
+          test -f dist/geldstart-apple-touch-icon.png
+          test -f dist/geldstart-favicon-32x32.png
           test -f dist/market-prices.json
+          test -f dist/market-history.json
 
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v5
