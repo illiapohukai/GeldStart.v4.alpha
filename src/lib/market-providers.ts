@@ -1,0 +1,1108 @@
+import {
+  buildFallbackMarketQuote,
+  CURATED_MARKET_ASSETS,
+  DEMO_INSTRUMENTS,
+  FALLBACK_PRICE_DATE,
+  getSourceQualifiedAssetKey,
+} from './market-demo-adapter';
+import type {
+  MarketAsset,
+  MarketDataProvider,
+  MarketPriceRecord,
+  MarketPriceRepository,
+  MarketQuote,
+  NormalizedQuoteStatus,
+  SharedQuoteCache,
+  SupportedCurrency,
+  TradingVenue,
+} from './market-types';
+
+export type MarketProviderErrorCode =
+  | 'UNCURATED_ASSET'
+  | 'INVALID_SYMBOL'
+  | 'INVALID_ISIN'
+  | 'NASDAQ_FORBIDDEN'
+  | 'NASDAQ_RATE_LIMIT'
+  | 'NASDAQ_HTTP_ERROR'
+  | 'BOERSE_FRANKFURT_HTTP_ERROR'
+  | 'MALFORMED_JSON'
+  | 'INVALID_QUOTE_DATA'
+  | 'STREAM_LIMIT_EXCEEDED'
+  | 'EMPTY_STREAM'
+  | 'FX_UNAVAILABLE'
+  | 'TIMEOUT';
+
+export class MarketProviderError extends Error {
+  readonly code: MarketProviderErrorCode;
+  readonly statusCode?: number;
+
+  constructor(
+    code: MarketProviderErrorCode,
+    message: string,
+    statusCode?: number,
+  ) {
+    super(message);
+    this.name = 'MarketProviderError';
+    this.code = code;
+    this.statusCode = statusCode;
+  }
+}
+
+const CURATED_SYMBOL_SET = new Set(
+  CURATED_MARKET_ASSETS.filter((a) => a.symbol).map((a) =>
+    a.symbol!.trim().toUpperCase(),
+  ),
+);
+
+const CURATED_ISIN_SET = new Set(
+  CURATED_MARKET_ASSETS.filter((a) => a.isin).map((a) =>
+    a.isin!.trim().toUpperCase(),
+  ),
+);
+
+export function isCuratedNasdaqSymbol(
+  symbol: string,
+  allowedSymbols: ReadonlySet<string> = CURATED_SYMBOL_SET,
+): boolean {
+  const normalized = symbol.trim().toUpperCase();
+  if (!/^[A-Z.\-^]{1,10}$/.test(normalized)) {
+    return false;
+  }
+  return allowedSymbols.has(normalized);
+}
+
+export function isCuratedBoerseIsin(
+  isin: string,
+  allowedIsins: ReadonlySet<string> = CURATED_ISIN_SET,
+): boolean {
+  const normalized = isin.trim().toUpperCase();
+  if (!/^[A-Z]{2}[A-Z0-9]{10}$/.test(normalized)) {
+    return false;
+  }
+  return allowedIsins.has(normalized);
+}
+
+export function roundMoney(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Safely parses Nasdaq currency strings like "$173.73" or "$1,234.50".
+ * Rejects percentages, negative numbers, zero, or malformed strings.
+ */
+export function parseNasdaqPrice(raw: unknown): number | null {
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) && raw > 0 ? roundMoney(raw) : null;
+  }
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.includes('%')) return null;
+  const cleaned = trimmed.replace(/[$,\s]/g, '');
+  if (!/^\d+(\.\d+)?$/.test(cleaned)) return null;
+  const parsed = Number.parseFloat(cleaned);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return roundMoney(parsed);
+}
+
+export function normalizeMarketTimestamp(
+  rawTime: unknown,
+  fallbackIso: string,
+): string | null {
+  if (typeof rawTime !== 'string' || !rawTime.trim()) {
+    return null;
+  }
+  const cleaned = rawTime
+    .trim()
+    .replace(/^DATA\s+AS\s+OF\s+/i, '')
+    .replace(/\s+ET$/i, '')
+    .trim();
+
+  const parsedMs = Date.parse(cleaned);
+  if (Number.isFinite(parsedMs)) {
+    return new Date(parsedMs).toISOString();
+  }
+  return fallbackIso;
+}
+
+export interface ParsedNasdaqQuotePayload {
+  symbol: string;
+  companyName: string | null;
+  price: number;
+  previousClose: number;
+  changeAbsolute: number;
+  changePercent: number;
+  marketTime: string | null;
+}
+
+export function parseNasdaqQuotePayload(
+  payload: unknown,
+  expectedSymbol: string,
+  fetchedAtIso = new Date().toISOString(),
+): ParsedNasdaqQuotePayload {
+  if (!payload || typeof payload !== 'object') {
+    throw new MarketProviderError(
+      'INVALID_QUOTE_DATA',
+      `Ungültige Nasdaq-Antwort für ${expectedSymbol}.`,
+    );
+  }
+
+  const root = payload as {
+    data?: {
+      symbol?: string;
+      companyName?: string;
+      primaryData?: {
+        lastSalePrice?: unknown;
+        netChange?: unknown;
+        percentageChange?: unknown;
+        lastTradeTimestamp?: unknown;
+      };
+    } | null;
+  };
+
+  const data = root.data;
+  if (!data || typeof data !== 'object' || !data.primaryData) {
+    throw new MarketProviderError(
+      'INVALID_QUOTE_DATA',
+      `Keine Kursdaten in der Nasdaq-Antwort für ${expectedSymbol}.`,
+    );
+  }
+
+  const price = parseNasdaqPrice(data.primaryData.lastSalePrice);
+  if (price === null) {
+    throw new MarketProviderError(
+      'INVALID_QUOTE_DATA',
+      `Kein gültiger Verkaufspreis (lastSalePrice) für ${expectedSymbol}.`,
+    );
+  }
+
+  const netChangeRaw =
+    typeof data.primaryData.netChange === 'string'
+      ? Number.parseFloat(data.primaryData.netChange.replace(/[$,+\s]/g, ''))
+      : typeof data.primaryData.netChange === 'number'
+        ? data.primaryData.netChange
+        : 0;
+  const changeAbsolute = Number.isFinite(netChangeRaw)
+    ? roundMoney(netChangeRaw)
+    : 0;
+  const previousClose =
+    price - changeAbsolute > 0 ? roundMoney(price - changeAbsolute) : price;
+  const changePercent =
+    previousClose > 0
+      ? roundMoney(((price - previousClose) / previousClose) * 100)
+      : 0;
+
+  const companyName =
+    typeof data.companyName === 'string' && data.companyName.trim().length > 0
+      ? data.companyName
+          .replace(
+            /\s+(Common Stock|Class [A-Z] Common Stock|American Depositary Shares).*$/i,
+            '',
+          )
+          .trim()
+      : null;
+
+  const marketTime = normalizeMarketTimestamp(
+    data.primaryData.lastTradeTimestamp,
+    fetchedAtIso,
+  );
+
+  return {
+    symbol: expectedSymbol.toUpperCase(),
+    companyName,
+    price,
+    previousClose,
+    changeAbsolute,
+    changePercent,
+    marketTime,
+  };
+}
+
+export async function fetchNasdaqPrototypeQuote(
+  asset: MarketAsset,
+  fxInfo: {
+    rateUsdToEur: number;
+    date: string;
+    status: 'available' | 'stale' | 'fallback';
+  },
+  options?: {
+    fetchFn?: typeof fetch;
+    timeoutMs?: number;
+    nowIso?: string;
+    allowedSymbols?: ReadonlySet<string>;
+  },
+): Promise<MarketQuote> {
+  const symbol = (asset.symbol ?? asset.id).trim().toUpperCase();
+  if (!/^[A-Z.\-^]{1,10}$/.test(symbol)) {
+    throw new MarketProviderError(
+      'INVALID_SYMBOL',
+      `Ungültiges US-Tickersymbol: ${symbol}`,
+    );
+  }
+  if (!isCuratedNasdaqSymbol(symbol, options?.allowedSymbols)) {
+    throw new MarketProviderError(
+      'UNCURATED_ASSET',
+      `Symbol ${symbol} ist nicht Teil des kuratierten Bildungskatalogs.`,
+    );
+  }
+
+  const fetchImpl = options?.fetchFn ?? fetch;
+  const timeoutMs = options?.timeoutMs ?? 10000;
+  const fetchedAt = options?.nowIso ?? new Date().toISOString();
+
+  const url = `https://api.nasdaq.com/api/quote/${encodeURIComponent(symbol)}/info?assetclass=stocks`;
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    throw new MarketProviderError(
+      'TIMEOUT',
+      err instanceof Error
+        ? `Nasdaq-Anfrage fehlgeschlagen: ${err.message}`
+        : 'Nasdaq-Anfrage durch Zeitüberschreitung abgebrochen.',
+    );
+  }
+
+  if (response.status === 403) {
+    throw new MarketProviderError(
+      'NASDAQ_FORBIDDEN',
+      `Nasdaq-Zugriff verweigert (HTTP 403) für ${symbol}.`,
+      403,
+    );
+  }
+  if (response.status === 429) {
+    throw new MarketProviderError(
+      'NASDAQ_RATE_LIMIT',
+      `Nasdaq-Abfragelimit erreicht (HTTP 429) für ${symbol}.`,
+      429,
+    );
+  }
+  if (!response.ok) {
+    throw new MarketProviderError(
+      'NASDAQ_HTTP_ERROR',
+      `Nasdaq-Abruf fehlgeschlagen (HTTP ${response.status}) für ${symbol}.`,
+      response.status,
+    );
+  }
+
+  let jsonPayload: unknown;
+  try {
+    jsonPayload = await response.json();
+  } catch {
+    throw new MarketProviderError(
+      'MALFORMED_JSON',
+      `Ungültiges JSON von Nasdaq für ${symbol}.`,
+    );
+  }
+
+  const parsed = parseNasdaqQuotePayload(jsonPayload, symbol, fetchedAt);
+  if (!Number.isFinite(fxInfo.rateUsdToEur) || fxInfo.rateUsdToEur <= 0) {
+    throw new MarketProviderError(
+      'FX_UNAVAILABLE',
+      'Kein gültiger USD/EUR-Wechselkurs für die Umrechnung verfügbar.',
+    );
+  }
+
+  const priceEur = roundMoney(parsed.price * fxInfo.rateUsdToEur);
+  const quoteStatus: NormalizedQuoteStatus =
+    fxInfo.status === 'fallback'
+      ? 'fallback'
+      : fxInfo.status === 'stale'
+        ? 'stale'
+        : 'delayed';
+
+  return {
+    assetId: asset.id,
+    symbol: parsed.symbol,
+    price: parsed.price,
+    currency: 'USD',
+    priceEur,
+    fxRateToEur: fxInfo.rateUsdToEur,
+    fxReferenceDate: fxInfo.date,
+    marketTime: parsed.marketTime,
+    fetchedAt,
+    source: 'nasdaq-prototype',
+    status: quoteStatus,
+    previousClose: parsed.previousClose,
+    changeAbsolute: parsed.changeAbsolute,
+    changePercent: parsed.changePercent,
+    exchange: 'NASDAQ',
+    timestamp: parsed.marketTime ?? fetchedAt,
+    providerName:
+      quoteStatus === 'fallback'
+        ? 'Demowert aus der Ausgangsversion, kein aktueller Börsenkurs.'
+        : 'Nasdaq Prototyp-Kurs (verzögert)',
+    isDemo: quoteStatus === 'fallback',
+    fallbackPriceDate:
+      quoteStatus === 'fallback'
+        ? (asset.fallbackPriceDate ?? FALLBACK_PRICE_DATE)
+        : undefined,
+  };
+}
+
+export interface ParsedBoerseQuoteEvent {
+  price: number;
+  currency: SupportedCurrency;
+  time: string | null;
+  previousClose: number;
+  changeAbsolute: number;
+  changePercent: number;
+}
+
+/**
+ * Parses text/event-stream chunks from Börse Frankfurt price_information.
+ * Adapted from Lovable `boerse.server.ts`:
+ * - ignores heartbeats and incomplete events;
+ * - rejects non-positive or percentage-quoted (`tradedInPercent`) instruments;
+ * - extracts `lastPrice`, `currency.originalValue`, `timestampLastPrice`.
+ */
+export function parseBoerseFrankfurtSseEvent(
+  text: string,
+): ParsedBoerseQuoteEvent | null {
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue;
+    const rawJson = line.slice(5).trim();
+    if (!rawJson) continue;
+    try {
+      const data = JSON.parse(rawJson) as {
+        lastPrice?: unknown;
+        closingPricePrevTradingDay?: unknown;
+        changeToPrevDayAbsolute?: unknown;
+        changeToPrevDayInPercent?: unknown;
+        currency?: { originalValue?: unknown };
+        timestampLastPrice?: unknown;
+        tradedInPercent?: unknown;
+      };
+
+      if (
+        typeof data.lastPrice !== 'number' ||
+        !Number.isFinite(data.lastPrice) ||
+        data.lastPrice <= 0 ||
+        Boolean(data.tradedInPercent)
+      ) {
+        continue;
+      }
+
+      const rawCurrency =
+        typeof data.currency?.originalValue === 'string'
+          ? data.currency.originalValue.trim().toUpperCase()
+          : '';
+      if (rawCurrency !== 'EUR' && rawCurrency !== 'USD') {
+        continue;
+      }
+
+      const price = roundMoney(data.lastPrice);
+      const prevClose =
+        typeof data.closingPricePrevTradingDay === 'number' &&
+        Number.isFinite(data.closingPricePrevTradingDay) &&
+        data.closingPricePrevTradingDay > 0
+          ? roundMoney(data.closingPricePrevTradingDay)
+          : price;
+      const changeAbsolute =
+        typeof data.changeToPrevDayAbsolute === 'number' &&
+        Number.isFinite(data.changeToPrevDayAbsolute)
+          ? roundMoney(data.changeToPrevDayAbsolute)
+          : roundMoney(price - prevClose);
+      const changePercent =
+        typeof data.changeToPrevDayInPercent === 'number' &&
+        Number.isFinite(data.changeToPrevDayInPercent)
+          ? roundMoney(data.changeToPrevDayInPercent)
+          : prevClose > 0
+            ? roundMoney(((price - prevClose) / prevClose) * 100)
+            : 0;
+
+      const time =
+        typeof data.timestampLastPrice === 'string' &&
+        data.timestampLastPrice.trim().length > 0
+          ? data.timestampLastPrice.trim()
+          : null;
+
+      return {
+        price,
+        currency: rawCurrency,
+        time,
+        previousClose: prevClose,
+        changeAbsolute,
+        changePercent,
+      };
+    } catch {
+      // Ignore heartbeat or incomplete SSE frame
+    }
+  }
+  return null;
+}
+
+const MAX_BOERSE_STREAM_CHARS = 100_000;
+
+export async function fetchBoerseFrankfurtPrototypeQuote(
+  asset: MarketAsset,
+  fxInfo: {
+    rateUsdToEur: number;
+    date: string;
+    status: 'available' | 'stale' | 'fallback';
+  },
+  options?: {
+    fetchFn?: typeof fetch;
+    timeoutMs?: number;
+    nowIso?: string;
+    allowedIsins?: ReadonlySet<string>;
+    maxStreamChars?: number;
+  },
+): Promise<MarketQuote> {
+  const isin = (asset.isin ?? '').trim().toUpperCase();
+  const venue: TradingVenue = asset.venue === 'XFRA' ? 'XFRA' : 'XETR';
+
+  if (!/^[A-Z]{2}[A-Z0-9]{10}$/.test(isin)) {
+    throw new MarketProviderError(
+      'INVALID_ISIN',
+      `Ungültige ISIN für Börse Frankfurt: ${isin}`,
+    );
+  }
+  if (!isCuratedBoerseIsin(isin, options?.allowedIsins)) {
+    throw new MarketProviderError(
+      'UNCURATED_ASSET',
+      `ISIN ${isin} ist nicht im kuratierten Bildungskatalog enthalten.`,
+    );
+  }
+
+  const fetchImpl = options?.fetchFn ?? fetch;
+  const timeoutMs = options?.timeoutMs ?? 15000;
+  const fetchedAt = options?.nowIso ?? new Date().toISOString();
+  const maxStreamChars = options?.maxStreamChars ?? MAX_BOERSE_STREAM_CHARS;
+
+  const url = `https://api.boerse-frankfurt.de/v1/data/price_information?isin=${encodeURIComponent(isin)}&mic=${encodeURIComponent(venue)}`;
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      headers: { Accept: 'text/event-stream' },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    throw new MarketProviderError(
+      'TIMEOUT',
+      err instanceof Error
+        ? `Börse-Frankfurt-Anfrage fehlgeschlagen: ${err.message}`
+        : 'Börse-Frankfurt-Anfrage durch Zeitüberschreitung abgebrochen.',
+    );
+  }
+
+  if (!response.ok) {
+    throw new MarketProviderError(
+      'BOERSE_FRANKFURT_HTTP_ERROR',
+      `Kurs von Börse Frankfurt nicht verfügbar (HTTP ${response.status}) für ${isin}.`,
+      response.status,
+    );
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new MarketProviderError(
+      'EMPTY_STREAM',
+      `Kein SSE-Stream von Börse Frankfurt für ${isin} empfangen.`,
+    );
+  }
+
+  let text = '';
+  const decoder = new TextDecoder();
+  let parsedQuote: ParsedBoerseQuoteEvent | null = null;
+
+  try {
+    while (text.length < maxStreamChars) {
+      const chunk = await reader.read();
+      if (chunk.value) {
+        text += decoder.decode(chunk.value, { stream: !chunk.done });
+      }
+      const boundary = text.lastIndexOf('\n');
+      const inspectSlice = chunk.done
+        ? text
+        : boundary >= 0
+          ? text.slice(0, boundary)
+          : '';
+      if (inspectSlice) {
+        parsedQuote = parseBoerseFrankfurtSseEvent(inspectSlice);
+        if (parsedQuote) {
+          break;
+        }
+      }
+      if (chunk.done) {
+        parsedQuote = parseBoerseFrankfurtSseEvent(text);
+        break;
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+
+  if (!parsedQuote) {
+    if (text.length >= maxStreamChars) {
+      throw new MarketProviderError(
+        'STREAM_LIMIT_EXCEEDED',
+        `Maximale Stream-Größe (${maxStreamChars} Zeichen) ohne gültigen Kurs überschritten.`,
+      );
+    }
+    throw new MarketProviderError(
+      'INVALID_QUOTE_DATA',
+      `Kein gültiger Aktien-/ETF-Kurs von Börse Frankfurt (${venue}) für ${isin} empfangen.`,
+    );
+  }
+
+  const isUsd = parsedQuote.currency === 'USD';
+  const fxRateToEur = isUsd ? fxInfo.rateUsdToEur : 1;
+  const priceEur = isUsd
+    ? roundMoney(parsedQuote.price * fxRateToEur)
+    : parsedQuote.price;
+
+  const quoteStatus: NormalizedQuoteStatus =
+    isUsd && fxInfo.status === 'fallback'
+      ? 'fallback'
+      : isUsd && fxInfo.status === 'stale'
+        ? 'stale'
+        : 'delayed';
+
+  const marketTimeIso = normalizeMarketTimestamp(parsedQuote.time, fetchedAt);
+
+  return {
+    assetId: asset.id,
+    symbol: asset.symbol ?? asset.id,
+    price: parsedQuote.price,
+    currency: parsedQuote.currency,
+    priceEur,
+    fxRateToEur,
+    fxReferenceDate: isUsd ? fxInfo.date : fetchedAt.slice(0, 10),
+    marketTime: marketTimeIso ?? parsedQuote.time,
+    fetchedAt,
+    source: 'boerse-frankfurt-prototype',
+    status: quoteStatus,
+    previousClose: parsedQuote.previousClose,
+    changeAbsolute: parsedQuote.changeAbsolute,
+    changePercent: parsedQuote.changePercent,
+    exchange: venue === 'XETR' ? 'XETRA' : 'Frankfurt',
+    timestamp: marketTimeIso ?? fetchedAt,
+    providerName:
+      quoteStatus === 'fallback'
+        ? 'Demowert aus der Ausgangsversion, kein aktueller Börsenkurs.'
+        : `Börse Frankfurt (${venue}) Prototyp-Kurs`,
+    isDemo: quoteStatus === 'fallback',
+    fallbackPriceDate:
+      quoteStatus === 'fallback'
+        ? (asset.fallbackPriceDate ?? FALLBACK_PRICE_DATE)
+        : undefined,
+  };
+}
+
+export interface FrankfurterFxResult {
+  rateUsdToEur: number;
+  date: string;
+}
+
+/**
+ * Retrieves the USD -> EUR reference exchange rate once per refresh cycle
+ * from https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR
+ */
+export async function fetchFrankfurterUsdToEurRate(options?: {
+  fetchFn?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<FrankfurterFxResult> {
+  const fetchImpl = options?.fetchFn ?? fetch;
+  const timeoutMs = options?.timeoutMs ?? 12000;
+  const url = 'https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR';
+
+  let res: Response;
+  try {
+    res = await fetchImpl(url, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    throw new MarketProviderError(
+      'FX_UNAVAILABLE',
+      err instanceof Error
+        ? `Frankfurter-Wechselkursabruf fehlgeschlagen: ${err.message}`
+        : 'Frankfurter-Wechselkursabruf fehlgeschlagen.',
+    );
+  }
+
+  if (!res.ok) {
+    throw new MarketProviderError(
+      'FX_UNAVAILABLE',
+      `USD/EUR-Referenzwechselkurs nicht verfügbar (HTTP ${res.status}).`,
+      res.status,
+    );
+  }
+
+  let data: { rates?: { EUR?: unknown }; date?: unknown };
+  try {
+    data = (await res.json()) as { rates?: { EUR?: unknown }; date?: unknown };
+  } catch {
+    throw new MarketProviderError(
+      'MALFORMED_JSON',
+      'Ungültige JSON-Antwort vom Frankfurter Wechselkursdienst.',
+    );
+  }
+
+  const rate = data?.rates?.EUR;
+  const date = typeof data?.date === 'string' ? data.date.trim() : '';
+
+  if (
+    typeof rate !== 'number' ||
+    !Number.isFinite(rate) ||
+    rate <= 0 ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(date)
+  ) {
+    throw new MarketProviderError(
+      'FX_UNAVAILABLE',
+      'Kein gültiger USD/EUR-Wechselkurs in der Frankfurter-Antwort enthalten.',
+    );
+  }
+
+  return {
+    rateUsdToEur: Math.round(rate * 100000) / 100000,
+    date,
+  };
+}
+
+/**
+ * In-memory prototype implementation of `MarketPriceRepository` (`market_prices` table shape).
+ * Note: In-memory cache is lost on server restart and is not shared across serverless instances.
+ */
+export class InMemoryMarketPriceRepository implements MarketPriceRepository {
+  private readonly store = new Map<string, MarketPriceRecord>();
+
+  async getAll(): Promise<MarketPriceRecord[]> {
+    return Array.from(this.store.values());
+  }
+
+  async getByAssetId(assetId: string): Promise<MarketPriceRecord | null> {
+    return this.store.get(assetId.toUpperCase()) ?? null;
+  }
+
+  async saveMany(records: MarketPriceRecord[]): Promise<void> {
+    for (const rec of records) {
+      this.store.set(rec.asset_id.toUpperCase(), { ...rec });
+    }
+  }
+
+  async clear(): Promise<void> {
+    this.store.clear();
+  }
+}
+
+export function toMarketPriceRecord(quote: MarketQuote): MarketPriceRecord {
+  const normalizedStatus: NormalizedQuoteStatus =
+    quote.status === 'available' ||
+    quote.status === 'delayed' ||
+    quote.status === 'stale' ||
+    quote.status === 'fallback'
+      ? quote.status
+      : quote.isDemo
+        ? 'fallback'
+        : 'delayed';
+
+  return {
+    asset_id: quote.assetId,
+    price: quote.price,
+    currency: quote.currency,
+    price_eur: quote.priceEur,
+    market_time: quote.marketTime,
+    fetched_at: quote.fetchedAt,
+    source: quote.source,
+    status: normalizedStatus,
+  };
+}
+
+async function runWithConcurrencyLimit<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const safeConcurrency = Math.max(1, Math.min(6, concurrency));
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function runWorker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const idx = nextIndex++;
+      const item = items[idx]!;
+      try {
+        const value = await worker(item);
+        results[idx] = { status: 'fulfilled', value };
+      } catch (reason) {
+        results[idx] = { status: 'rejected', reason };
+      }
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(safeConcurrency, items.length) },
+    () => runWorker(),
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+export interface PrototypeProviderOptions {
+  fetchFn?: typeof fetch;
+  concurrency?: number;
+  timeoutMs?: number;
+  nowFn?: () => Date;
+  allowedSymbols?: ReadonlySet<string>;
+  allowedIsins?: ReadonlySet<string>;
+  previousCache?: SharedQuoteCache | null;
+}
+
+/**
+ * Replaceable MarketDataProvider implementation for the school prototype.
+ * Deduplicates assets by source-qualified key, fetches USD/EUR once, and fetches
+ * each unique asset quote once with bounded concurrency (default 5).
+ */
+export class PrototypeMarketDataProvider implements MarketDataProvider {
+  private readonly options: PrototypeProviderOptions;
+  private lastFxResult: {
+    rateUsdToEur: number;
+    date: string;
+    status: 'available' | 'stale' | 'fallback';
+  } | null = null;
+
+  constructor(options: PrototypeProviderOptions = {}) {
+    this.options = options;
+  }
+
+  public getLastFxResult() {
+    return this.lastFxResult;
+  }
+
+  async getQuotes(
+    assets: MarketAsset[],
+    previousCache?: SharedQuoteCache | null,
+  ): Promise<MarketQuote[]> {
+    const now = (this.options.nowFn ?? (() => new Date()))();
+    const nowIso = now.toISOString();
+    const priorCache = previousCache ?? this.options.previousCache ?? null;
+
+    // 1. Deduplicate assets by source-qualified key
+    const uniqueByKey = new Map<string, MarketAsset>();
+    const keyToAssets = new Map<string, MarketAsset[]>();
+    for (const asset of assets) {
+      const key = getSourceQualifiedAssetKey(asset);
+      if (!uniqueByKey.has(key)) {
+        uniqueByKey.set(key, asset);
+      }
+      const list = keyToAssets.get(key) ?? [];
+      list.push(asset);
+      keyToAssets.set(key, list);
+    }
+
+    const uniqueAssets = Array.from(uniqueByKey.values());
+    const needsUsdFx = uniqueAssets.some((a) => a.quoteCurrency === 'USD');
+
+    // 2. Retrieve USD/EUR once per refresh cycle
+    let fxInfo: {
+      rateUsdToEur: number;
+      date: string;
+      status: 'available' | 'stale' | 'fallback';
+    } = {
+      rateUsdToEur: 0.9215,
+      date: FALLBACK_PRICE_DATE,
+      status: 'fallback',
+    };
+
+    if (needsUsdFx) {
+      try {
+        const fx = await fetchFrankfurterUsdToEurRate({
+          fetchFn: this.options.fetchFn,
+          timeoutMs: this.options.timeoutMs,
+        });
+        fxInfo = {
+          rateUsdToEur: fx.rateUsdToEur,
+          date: fx.date,
+          status: 'available',
+        };
+      } catch {
+        if (
+          priorCache &&
+          Number.isFinite(priorCache.fxRateUsdToEur) &&
+          priorCache.fxRateUsdToEur > 0 &&
+          priorCache.fxStatus !== 'fallback'
+        ) {
+          fxInfo = {
+            rateUsdToEur: priorCache.fxRateUsdToEur,
+            date: priorCache.fxReferenceDate,
+            status: 'stale',
+          };
+        } else {
+          // Fallback FX rate: clearly labelled as fallback/demo data
+          fxInfo = {
+            rateUsdToEur: 0.9215,
+            date: FALLBACK_PRICE_DATE,
+            status: 'fallback',
+          };
+        }
+      }
+    } else {
+      fxInfo = {
+        rateUsdToEur: priorCache?.fxRateUsdToEur ?? 0.9215,
+        date: priorCache?.fxReferenceDate ?? nowIso.slice(0, 10),
+        status: priorCache?.fxStatus ?? 'available',
+      };
+    }
+
+    this.lastFxResult = fxInfo;
+
+    // 3. Retrieve every unique asset quote once with bounded concurrency (default 5)
+    const concurrency = this.options.concurrency ?? 5;
+    const settled = await runWithConcurrencyLimit(
+      uniqueAssets,
+      concurrency,
+      async (asset): Promise<MarketQuote> => {
+        if (asset.assetType === 'cash' || asset.source === 'manual-demo') {
+          return {
+            assetId: asset.id,
+            symbol: asset.symbol ?? asset.id,
+            price: 1,
+            currency: 'EUR',
+            priceEur: 1,
+            fxRateToEur: 1,
+            fxReferenceDate: nowIso.slice(0, 10),
+            marketTime: nowIso,
+            fetchedAt: nowIso,
+            source: 'manual-demo',
+            status: 'available',
+            previousClose: 1,
+            changeAbsolute: 0,
+            changePercent: 0,
+            exchange: 'EUR-Konto',
+            timestamp: nowIso,
+            providerName: 'Virtuelles Bargeld (EUR)',
+            isDemo: false,
+          };
+        }
+
+        if (asset.source === 'nasdaq-prototype') {
+          return fetchNasdaqPrototypeQuote(asset, fxInfo, {
+            fetchFn: this.options.fetchFn,
+            timeoutMs: this.options.timeoutMs,
+            nowIso,
+            allowedSymbols: this.options.allowedSymbols,
+          });
+        }
+
+        if (asset.source === 'boerse-frankfurt-prototype') {
+          return fetchBoerseFrankfurtPrototypeQuote(asset, fxInfo, {
+            fetchFn: this.options.fetchFn,
+            timeoutMs: this.options.timeoutMs,
+            nowIso,
+            allowedIsins: this.options.allowedIsins,
+          });
+        }
+
+        return buildFallbackMarketQuote(asset, nowIso);
+      },
+    );
+
+    // 4. Normalize all results, retaining stale quotes on failure or falling back to demo
+    const outputQuotes: MarketQuote[] = [];
+
+    settled.forEach((res, idx) => {
+      const canonicalAsset = uniqueAssets[idx]!;
+      const key = getSourceQualifiedAssetKey(canonicalAsset);
+      const matchingAssets = keyToAssets.get(key) ?? [canonicalAsset];
+
+      for (const targetAsset of matchingAssets) {
+        if (res.status === 'fulfilled') {
+          outputQuotes.push({
+            ...res.value,
+            assetId: targetAsset.id,
+            symbol: targetAsset.symbol ?? targetAsset.id,
+          });
+          continue;
+        }
+
+        // Refresh failed for this asset: check if we have a last successful quote in priorCache
+        const prevQuote =
+          priorCache?.quotes[targetAsset.id.toUpperCase()] ??
+          (targetAsset.symbol
+            ? priorCache?.quotes[targetAsset.symbol.toUpperCase()]
+            : undefined);
+
+        if (prevQuote && prevQuote.status !== 'fallback' && !prevQuote.isDemo) {
+          const staleDate = (
+            prevQuote.marketTime ??
+            prevQuote.fetchedAt ??
+            nowIso
+          ).slice(0, 10);
+          outputQuotes.push({
+            ...prevQuote,
+            assetId: targetAsset.id,
+            symbol: targetAsset.symbol ?? targetAsset.id,
+            status: 'stale',
+            isDemo: false,
+            providerName: `Letzter verfügbarer Kurs vom ${staleDate}. Die heutige Aktualisierung war nicht möglich.`,
+          });
+        } else {
+          // No prior successful quote exists -> clearly labelled fallback value
+          outputQuotes.push(buildFallbackMarketQuote(targetAsset, nowIso));
+        }
+      }
+    });
+
+    return outputQuotes;
+  }
+}
+
+export const DAILY_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+export interface SharedRefreshCoordinatorOptions extends PrototypeProviderOptions {
+  repository?: MarketPriceRepository;
+  cacheTtlMs?: number;
+  assets?: MarketAsset[];
+}
+
+/**
+ * Centralized Daily Cache & Shared Refresh Coordinator (Phases 8 & 9).
+ * Ensures:
+ * - Only one refresh runs at a time (`pendingRefresh` lock);
+ * - Concurrent callers await the same `pendingRefresh` promise;
+ * - Subsequent requests within the daily cache window receive `cachedQuotes` with 0 upstream requests;
+ * - Users cannot trigger unlimited external refreshes.
+ */
+export class SharedDailyQuoteCoordinator {
+  private cachedQuotes: SharedQuoteCache | null = null;
+  private pendingRefresh: Promise<SharedQuoteCache> | null = null;
+  private readonly repository: MarketPriceRepository;
+  private readonly cacheTtlMs: number;
+  private readonly assets: MarketAsset[];
+  private readonly provider: PrototypeMarketDataProvider;
+  private readonly nowFn: () => Date;
+
+  constructor(options: SharedRefreshCoordinatorOptions = {}) {
+    this.repository = options.repository ?? new InMemoryMarketPriceRepository();
+    this.cacheTtlMs = options.cacheTtlMs ?? DAILY_CACHE_TTL_MS;
+    this.assets = options.assets ?? CURATED_MARKET_ASSETS;
+    this.nowFn = options.nowFn ?? (() => new Date());
+    this.provider = new PrototypeMarketDataProvider({
+      ...options,
+      nowFn: this.nowFn,
+    });
+  }
+
+  public getRepository(): MarketPriceRepository {
+    return this.repository;
+  }
+
+  public getCachedSnapshot(): SharedQuoteCache | null {
+    return this.cachedQuotes;
+  }
+
+  public isCacheValid(nowMs = this.nowFn().getTime()): boolean {
+    if (!this.cachedQuotes) return false;
+    const currentDateKey = new Date(nowMs).toISOString().slice(0, 10);
+    return (
+      nowMs < this.cachedQuotes.expiresAt &&
+      this.cachedQuotes.cacheDateKey === currentDateKey
+    );
+  }
+
+  /**
+   * Returns shared cached quotes for all users.
+   * Performs a lazy daily refresh only when the daily cache is empty or expired.
+   */
+  public async getSharedQuotes(): Promise<SharedQuoteCache> {
+    const nowMs = this.nowFn().getTime();
+    if (this.cachedQuotes && this.isCacheValid(nowMs)) {
+      return this.cachedQuotes;
+    }
+
+    if (this.pendingRefresh) {
+      return this.pendingRefresh;
+    }
+
+    this.pendingRefresh = this.performSharedRefresh();
+    try {
+      return await this.pendingRefresh;
+    } finally {
+      this.pendingRefresh = null;
+    }
+  }
+
+  /**
+   * Internal refresh operation for the complete curated catalogue.
+   */
+  private async performSharedRefresh(): Promise<SharedQuoteCache> {
+    const now = this.nowFn();
+    const nowIso = now.toISOString();
+    const prior = this.cachedQuotes;
+
+    const quoteList = await this.provider.getQuotes(this.assets, prior);
+    const fx = this.provider.getLastFxResult() ?? {
+      rateUsdToEur: prior?.fxRateUsdToEur ?? 0.9215,
+      date: prior?.fxReferenceDate ?? FALLBACK_PRICE_DATE,
+      status: prior?.fxStatus ?? 'fallback',
+    };
+
+    const quotesMap: Record<string, MarketQuote> = {};
+    const records: MarketPriceRecord[] = [];
+
+    for (const q of quoteList) {
+      quotesMap[q.assetId.toUpperCase()] = q;
+      quotesMap[q.symbol.toUpperCase()] = q;
+      records.push(toMarketPriceRecord(q));
+    }
+
+    await this.repository.saveMany(records);
+
+    const nextCache: SharedQuoteCache = {
+      quotes: quotesMap,
+      quoteList,
+      records,
+      fxRateUsdToEur: fx.rateUsdToEur,
+      fxReferenceDate: fx.date,
+      fxStatus: fx.status,
+      fetchedAt: nowIso,
+      cacheDateKey: nowIso.slice(0, 10),
+      expiresAt: now.getTime() + this.cacheTtlMs,
+      refreshCount: (prior?.refreshCount ?? 0) + 1,
+    };
+
+    this.cachedQuotes = nextCache;
+    return nextCache;
+  }
+
+  /**
+   * Used in unit tests to simulate cache expiry or reset state.
+   */
+  public expireCacheForTesting(): void {
+    if (this.cachedQuotes) {
+      this.cachedQuotes = {
+        ...this.cachedQuotes,
+        expiresAt: 0,
+        cacheDateKey: '1970-01-01',
+      };
+    }
+  }
+}
+
+export const sharedQuoteCoordinator = new SharedDailyQuoteCoordinator();
+
+export function getCuratedAssetByIdentifier(
+  identifier: string,
+): MarketAsset | null {
+  const norm = identifier.trim().toUpperCase();
+  return (
+    CURATED_MARKET_ASSETS.find(
+      (a) =>
+        a.id.toUpperCase() === norm ||
+        (a.symbol && a.symbol.toUpperCase() === norm) ||
+        (a.isin && a.isin.toUpperCase() === norm),
+    ) ?? null
+  );
+}
+
+export function getCuratedInstrumentMetadataList() {
+  return DEMO_INSTRUMENTS;
+}

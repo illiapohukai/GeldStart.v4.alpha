@@ -7,10 +7,12 @@ import {
   roundCurrency,
   roundQuantity,
 } from './depot-calculations';
+import { getUnlockedAssetIds } from './market-demo-adapter';
 import type { ExchangeRateQuote, MarketQuote } from './market-types';
 import type { StorageLike } from './storage';
 
 export const DEPOT_STORAGE_KEY = 'geldstart_depot_v1';
+export const DEFAULT_INITIAL_CAPITAL_EUR = 5000;
 
 export const STARTING_CASH_PRESETS = [
   {
@@ -41,55 +43,68 @@ export const STARTING_CASH_PRESETS = [
 
 export function createUninitializedDepotState(): DepotPortfolioState {
   const nowIso = new Date().toISOString();
+  const starterUnlocked = getUnlockedAssetIds({});
   return {
-    version: 1,
+    version: 2,
     isInitialized: false,
     portfolioName: 'Mein Übungsdepot',
     baseCurrency: 'EUR',
-    startingCashEur: 5000,
-    cashEur: 5000,
+    startingCashEur: DEFAULT_INITIAL_CAPITAL_EUR,
+    initialCapitalEur: DEFAULT_INITIAL_CAPITAL_EUR,
+    cashEur: DEFAULT_INITIAL_CAPITAL_EUR,
     realizedGainLossTotalEur: 0,
     positions: [],
     transactions: [],
+    unlockedAssets: starterUnlocked,
     lastKnownQuotes: {},
     lastKnownFxRates: {},
     snapshots: [],
     createdAt: nowIso,
     lastUpdatedAt: nowIso,
+    updatedAt: nowIso,
   };
 }
 
-export function initializeVirtualPortfolio(params: {
-  startingCashEur: number;
+export function initializeVirtualPortfolio(params?: {
+  startingCashEur?: number;
   portfolioName?: string;
   createdAt?: string;
+  unlockedAssets?: string[];
 }): DepotPortfolioState {
+  const rawCash = params?.startingCashEur ?? DEFAULT_INITIAL_CAPITAL_EUR;
   const safeStart = roundCurrency(
-    Number.isFinite(params.startingCashEur) && params.startingCashEur >= 100
-      ? Math.min(1000000, params.startingCashEur)
-      : 5000,
+    Number.isFinite(rawCash) && rawCash >= 100
+      ? Math.min(1000000, rawCash)
+      : DEFAULT_INITIAL_CAPITAL_EUR,
   );
   const name =
-    params.portfolioName && params.portfolioName.trim().length > 0
+    params?.portfolioName && params.portfolioName.trim().length > 0
       ? params.portfolioName.trim().slice(0, 50)
       : 'Mein Übungsdepot';
-  const nowIso = params.createdAt ?? new Date().toISOString();
+  const nowIso = params?.createdAt ?? new Date().toISOString();
+  const unlockedAssets =
+    params?.unlockedAssets && params.unlockedAssets.length > 0
+      ? Array.from(new Set(params.unlockedAssets))
+      : getUnlockedAssetIds({});
 
   const initial: DepotPortfolioState = {
-    version: 1,
+    version: 2,
     isInitialized: true,
     portfolioName: name,
     baseCurrency: 'EUR',
     startingCashEur: safeStart,
+    initialCapitalEur: safeStart,
     cashEur: safeStart,
     realizedGainLossTotalEur: 0,
     positions: [],
     transactions: [],
+    unlockedAssets,
     lastKnownQuotes: {},
     lastKnownFxRates: {},
     snapshots: [],
     createdAt: nowIso,
     lastUpdatedAt: nowIso,
+    updatedAt: nowIso,
   };
 
   const firstSnapshot = buildPortfolioSnapshot(initial, 'creation', nowIso);
@@ -128,12 +143,15 @@ export function sanitizeDepotState(raw: unknown): DepotPortfolioState {
       ? candidate.portfolioName.trim().slice(0, 50)
       : 'Mein Übungsdepot';
 
+  const rawInitial =
+    typeof candidate.initialCapitalEur === 'number' && Number.isFinite(candidate.initialCapitalEur)
+      ? candidate.initialCapitalEur
+      : typeof candidate.startingCashEur === 'number' && Number.isFinite(candidate.startingCashEur)
+        ? candidate.startingCashEur
+        : DEFAULT_INITIAL_CAPITAL_EUR;
+
   const startingCashEur =
-    typeof candidate.startingCashEur === 'number' &&
-    Number.isFinite(candidate.startingCashEur) &&
-    candidate.startingCashEur > 0
-      ? roundCurrency(candidate.startingCashEur)
-      : 5000;
+    rawInitial > 0 ? roundCurrency(rawInitial) : DEFAULT_INITIAL_CAPITAL_EUR;
 
   const cashEur =
     typeof candidate.cashEur === 'number' &&
@@ -153,36 +171,44 @@ export function sanitizeDepotState(raw: unknown): DepotPortfolioState {
     for (const rawPos of candidate.positions) {
       if (!rawPos || typeof rawPos !== 'object') continue;
       const p = rawPos as Record<string, unknown>;
+      const sym =
+        typeof p.symbol === 'string' && p.symbol.trim().length > 0
+          ? p.symbol.trim().toUpperCase()
+          : typeof p.assetId === 'string' && p.assetId.trim().length > 0
+            ? p.assetId.trim().toUpperCase()
+            : '';
       if (
-        typeof p.symbol === 'string' &&
-        p.symbol.trim().length > 0 &&
+        sym.length > 0 &&
         typeof p.name === 'string' &&
         typeof p.quantity === 'number' &&
         Number.isFinite(p.quantity) &&
         p.quantity > 0
       ) {
         const qty = roundQuantity(p.quantity);
-        const avgEur =
-          typeof p.averagePurchasePriceEur === 'number' &&
-          Number.isFinite(p.averagePurchasePriceEur) &&
-          p.averagePurchasePriceEur > 0
-            ? roundCurrency(p.averagePurchasePriceEur)
-            : 1;
+        const rawAvgEur =
+          typeof p.averagePurchasePriceEur === 'number' && Number.isFinite(p.averagePurchasePriceEur)
+            ? p.averagePurchasePriceEur
+            : typeof p.averageBuyPriceEur === 'number' && Number.isFinite(p.averageBuyPriceEur)
+              ? p.averageBuyPriceEur
+              : 1;
+        const avgEur = rawAvgEur > 0 ? roundCurrency(rawAvgEur) : 1;
         const avgOrig =
           typeof p.averagePurchasePriceOriginal === 'number' &&
           Number.isFinite(p.averagePurchasePriceOriginal) &&
           p.averagePurchasePriceOriginal > 0
             ? roundCurrency(p.averagePurchasePriceOriginal)
             : avgEur;
-        const costBasis =
-          typeof p.investedCostBasisEur === 'number' &&
-          Number.isFinite(p.investedCostBasisEur) &&
-          p.investedCostBasisEur >= 0
-            ? roundCurrency(p.investedCostBasisEur)
-            : roundCurrency(qty * avgEur);
+        const rawCostBasis =
+          typeof p.investedCostBasisEur === 'number' && Number.isFinite(p.investedCostBasisEur)
+            ? p.investedCostBasisEur
+            : typeof p.investedAmountEur === 'number' && Number.isFinite(p.investedAmountEur)
+              ? p.investedAmountEur
+              : qty * avgEur;
+        const costBasis = rawCostBasis >= 0 ? roundCurrency(rawCostBasis) : roundCurrency(qty * avgEur);
 
         positions.push({
-          symbol: p.symbol.trim().toUpperCase(),
+          assetId: sym,
+          symbol: sym,
           name: p.name,
           assetType:
             p.assetType === 'ETF' ||
@@ -206,7 +232,9 @@ export function sanitizeDepotState(raw: unknown): DepotPortfolioState {
           quantity: qty,
           averagePurchasePriceOriginal: avgOrig,
           averagePurchasePriceEur: avgEur,
+          averageBuyPriceEur: avgEur,
           investedCostBasisEur: costBasis,
+          investedAmountEur: costBasis,
           updatedAt:
             typeof p.updatedAt === 'string' ? p.updatedAt : new Date().toISOString(),
         });
@@ -219,20 +247,55 @@ export function sanitizeDepotState(raw: unknown): DepotPortfolioState {
     for (const rawTx of candidate.transactions) {
       if (!rawTx || typeof rawTx !== 'object') continue;
       const t = rawTx as Record<string, unknown>;
+      const txType =
+        t.type === 'BUY' || t.tradeType === 'buy'
+          ? 'BUY'
+          : t.type === 'SELL' || t.tradeType === 'sell'
+            ? 'SELL'
+            : null;
+      const sym =
+        typeof t.symbol === 'string' && t.symbol.trim().length > 0
+          ? t.symbol.trim().toUpperCase()
+          : typeof t.assetId === 'string' && t.assetId.trim().length > 0
+            ? t.assetId.trim().toUpperCase()
+            : '';
       if (
         typeof t.id === 'string' &&
-        (t.type === 'BUY' || t.type === 'SELL') &&
-        typeof t.symbol === 'string' &&
+        txType !== null &&
+        sym.length > 0 &&
         typeof t.quantity === 'number' &&
         Number.isFinite(t.quantity) &&
         t.quantity > 0
       ) {
+        const priceEurVal =
+          typeof t.priceEur === 'number' && Number.isFinite(t.priceEur)
+            ? roundCurrency(t.priceEur)
+            : typeof t.executionPriceEur === 'number' && Number.isFinite(t.executionPriceEur)
+              ? roundCurrency(t.executionPriceEur)
+              : 0;
+        const totalEurVal =
+          typeof t.totalAmountEur === 'number' && Number.isFinite(t.totalAmountEur)
+            ? roundCurrency(t.totalAmountEur)
+            : typeof t.totalEur === 'number' && Number.isFinite(t.totalEur)
+              ? roundCurrency(t.totalEur)
+              : 0;
+        const priceTs =
+          typeof t.priceTimestamp === 'string'
+            ? t.priceTimestamp
+            : typeof t.quoteFetchedAt === 'string'
+              ? t.quoteFetchedAt
+              : new Date().toISOString();
+        const fetchedTs =
+          typeof t.quoteFetchedAt === 'string' ? t.quoteFetchedAt : priceTs;
+
         transactions.push({
           id: t.id,
-          type: t.type,
-          symbol: t.symbol.toUpperCase(),
+          type: txType,
+          tradeType: txType === 'BUY' ? 'buy' : 'sell',
+          assetId: sym,
+          symbol: sym,
           instrumentName:
-            typeof t.instrumentName === 'string' ? t.instrumentName : t.symbol,
+            typeof t.instrumentName === 'string' ? t.instrumentName : sym,
           assetType:
             t.assetType === 'ETF' ||
             t.assetType === 'Aktie' ||
@@ -244,30 +307,27 @@ export function sanitizeDepotState(raw: unknown): DepotPortfolioState {
           priceOriginal:
             typeof t.priceOriginal === 'number' && Number.isFinite(t.priceOriginal)
               ? roundCurrency(t.priceOriginal)
-              : 0,
+              : priceEurVal,
           currency: t.currency === 'USD' ? 'USD' : 'EUR',
           fxRateToEur:
             typeof t.fxRateToEur === 'number' && Number.isFinite(t.fxRateToEur) && t.fxRateToEur > 0
               ? t.fxRateToEur
               : 1,
-          priceEur:
-            typeof t.priceEur === 'number' && Number.isFinite(t.priceEur)
-              ? roundCurrency(t.priceEur)
-              : 0,
-          totalAmountEur:
-            typeof t.totalAmountEur === 'number' && Number.isFinite(t.totalAmountEur)
-              ? roundCurrency(t.totalAmountEur)
-              : 0,
+          priceEur: priceEurVal,
+          executionPriceEur: priceEurVal,
+          totalAmountEur: totalEurVal,
+          totalEur: totalEurVal,
           realizedGainLossEur:
             typeof t.realizedGainLossEur === 'number' &&
             Number.isFinite(t.realizedGainLossEur)
               ? roundCurrency(t.realizedGainLossEur)
               : undefined,
-          priceTimestamp:
-            typeof t.priceTimestamp === 'string'
-              ? t.priceTimestamp
-              : new Date().toISOString(),
+          priceTimestamp: priceTs,
+          quoteFetchedAt: fetchedTs,
           dataStatus:
+            t.dataStatus === 'live' ||
+            t.dataStatus === 'stale' ||
+            t.dataStatus === 'fallback' ||
             t.dataStatus === 'real-time' ||
             t.dataStatus === 'delayed' ||
             t.dataStatus === 'end-of-day' ||
@@ -284,21 +344,45 @@ export function sanitizeDepotState(raw: unknown): DepotPortfolioState {
     }
   }
 
+  // Only keep quotes for held positions to avoid storing a duplicate copy of the entire market catalogue per user
+  const heldSymbolSet = new Set(positions.map((p) => p.symbol.toUpperCase()));
   const lastKnownQuotes: Record<string, MarketQuote> = {};
   if (candidate.lastKnownQuotes && typeof candidate.lastKnownQuotes === 'object') {
     for (const [sym, qVal] of Object.entries(
       candidate.lastKnownQuotes as Record<string, unknown>,
     )) {
+      const upperSym = sym.toUpperCase();
+      if (heldSymbolSet.size > 0 && !heldSymbolSet.has(upperSym)) {
+        continue;
+      }
       if (qVal && typeof qVal === 'object') {
         const q = qVal as Record<string, unknown>;
         if (typeof q.price === 'number' && Number.isFinite(q.price) && q.price > 0) {
-          lastKnownQuotes[sym.toUpperCase()] = {
-            symbol: sym.toUpperCase(),
-            price: roundCurrency(q.price),
+          const ts =
+            typeof q.timestamp === 'string'
+              ? q.timestamp
+              : typeof q.marketTime === 'string'
+                ? q.marketTime
+                : new Date().toISOString();
+          const priceVal = roundCurrency(q.price);
+          const priceEurVal =
+            typeof q.priceEur === 'number' && Number.isFinite(q.priceEur)
+              ? roundCurrency(q.priceEur)
+              : priceVal;
+          const fxRateVal =
+            typeof q.fxRateToEur === 'number' && Number.isFinite(q.fxRateToEur) && q.fxRateToEur > 0
+              ? q.fxRateToEur
+              : 1;
+          lastKnownQuotes[upperSym] = {
+            assetId: upperSym,
+            symbol: upperSym,
+            price: priceVal,
+            priceEur: priceEurVal,
+            fxRateToEur: fxRateVal,
             previousClose:
               typeof q.previousClose === 'number' && Number.isFinite(q.previousClose)
                 ? roundCurrency(q.previousClose)
-                : roundCurrency(q.price),
+                : priceVal,
             changeAbsolute:
               typeof q.changeAbsolute === 'number' && Number.isFinite(q.changeAbsolute)
                 ? roundCurrency(q.changeAbsolute)
@@ -309,9 +393,20 @@ export function sanitizeDepotState(raw: unknown): DepotPortfolioState {
                 : 0,
             currency: q.currency === 'USD' ? 'USD' : 'EUR',
             exchange: typeof q.exchange === 'string' ? q.exchange : 'XETRA',
-            timestamp:
-              typeof q.timestamp === 'string' ? q.timestamp : new Date().toISOString(),
+            marketTime: typeof q.marketTime === 'string' ? q.marketTime : ts,
+            fetchedAt: typeof q.fetchedAt === 'string' ? q.fetchedAt : ts,
+            timestamp: ts,
+            source:
+              q.source === 'nasdaq-prototype' ||
+              q.source === 'boerse-frankfurt-prototype' ||
+              q.source === 'manual-demo'
+                ? q.source
+                : 'manual-demo',
             status:
+              q.status === 'available' ||
+              q.status === 'live' ||
+              q.status === 'stale' ||
+              q.status === 'fallback' ||
               q.status === 'real-time' ||
               q.status === 'delayed' ||
               q.status === 'end-of-day' ||
@@ -346,8 +441,8 @@ export function sanitizeDepotState(raw: unknown): DepotPortfolioState {
             timestamp:
               typeof fx.timestamp === 'string' ? fx.timestamp : new Date().toISOString(),
             source: typeof fx.source === 'string' ? fx.source : 'Wechselkurs',
-            status: 'demo',
-            isDemo: typeof fx.isDemo === 'boolean' ? fx.isDemo : true,
+            status: 'delayed',
+            isDemo: typeof fx.isDemo === 'boolean' ? fx.isDemo : false,
           };
         }
       }
@@ -389,11 +484,17 @@ export function sanitizeDepotState(raw: unknown): DepotPortfolioState {
             s.reason === 'refresh'
               ? s.reason
               : 'refresh',
-          dataStatus: 'demo',
+          dataStatus: 'live',
         });
       }
     }
   }
+
+  const rawUnlocked = Array.isArray(candidate.unlockedAssets)
+    ? candidate.unlockedAssets.filter((id): id is string => typeof id === 'string')
+    : [];
+  const defaultStarter = getUnlockedAssetIds({});
+  const unlockedAssets = Array.from(new Set([...defaultStarter, ...rawUnlocked]));
 
   const createdAt =
     typeof candidate.createdAt === 'string'
@@ -402,23 +503,28 @@ export function sanitizeDepotState(raw: unknown): DepotPortfolioState {
   const lastUpdatedAt =
     typeof candidate.lastUpdatedAt === 'string'
       ? candidate.lastUpdatedAt
-      : createdAt;
+      : typeof candidate.updatedAt === 'string'
+        ? candidate.updatedAt
+        : createdAt;
 
   return {
-    version: 1,
+    version: 2,
     isInitialized: true,
     portfolioName,
     baseCurrency: 'EUR',
     startingCashEur,
+    initialCapitalEur: startingCashEur,
     cashEur,
     realizedGainLossTotalEur,
     positions,
     transactions,
+    unlockedAssets,
     lastKnownQuotes,
     lastKnownFxRates,
     snapshots,
     createdAt,
     lastUpdatedAt,
+    updatedAt: lastUpdatedAt,
   };
 }
 

@@ -1,32 +1,75 @@
-export type MarketDataStatus =
-  | 'real-time'
+export type MarketSource =
+  | 'nasdaq-prototype'
+  | 'boerse-frankfurt-prototype'
+  | 'manual-demo';
+
+export type NormalizedQuoteStatus =
+  | 'available'
+  | 'live'
   | 'delayed'
+  | 'stale'
+  | 'fallback';
+
+export type MarketDataStatus =
+  | NormalizedQuoteStatus
+  | 'real-time'
   | 'end-of-day'
   | 'cached'
   | 'demo'
   | 'unavailable';
 
+export type MarketAssetCategory = 'stock' | 'etf' | 'crypto' | 'cash';
+
 export type InstrumentAssetType = 'ETF' | 'Aktie' | 'Anleihen-ETF' | 'Rohstoff-ETC';
 
 export type SupportedCurrency = 'EUR' | 'USD';
 
+export type TradingVenue = 'XETR' | 'XFRA';
+
 export type RiskCategory =
+  | 'Niedrig'
   | 'Niedrig bis mittel'
   | 'Mittel'
   | 'Mittel bis hoch'
   | 'Hoch'
   | 'Sehr hoch';
 
+export interface MarketAsset {
+  id: string;
+  name: string;
+  assetType: MarketAssetCategory;
+  source: MarketSource;
+  symbol?: string;
+  isin?: string;
+  venue?: TradingVenue;
+  quoteCurrency: SupportedCurrency;
+  riskLabel?: string;
+  unlockedByLesson?: string;
+  fallbackPriceEur?: number;
+  fallbackPriceDate?: string;
+}
+
 export interface InstrumentMetadata {
+  id: string;
   symbol: string;
   name: string;
   isin?: string;
   assetType: InstrumentAssetType;
+  category: MarketAssetCategory;
+  source: MarketSource;
+  venue?: TradingVenue;
   exchange: string;
   currency: SupportedCurrency;
+  quoteCurrency: SupportedCurrency;
   sector: string;
   region: string;
   riskCategory: RiskCategory;
+  riskLabel: string;
+  unlockedByLesson?: string;
+  unlockReasonLabel?: string;
+  unlockRequirementText?: string;
+  fallbackPriceEur: number;
+  fallbackPriceDate: string;
   shortExplanation: string;
   educationalNotes: string[];
   /** Whether fractional shares (e.g. Sparplan-Bruchstücke) are supported in the simulator */
@@ -34,17 +77,81 @@ export interface InstrumentMetadata {
 }
 
 export interface MarketQuote {
+  /** Stable internal asset ID */
+  assetId: string;
+  /** Display symbol / ticker for UI compatibility */
   symbol: string;
+  /** Quote price in native quoteCurrency */
   price: number;
-  previousClose: number;
-  changeAbsolute: number;
-  changePercent: number;
+  /** Native currency of the quote ('EUR' | 'USD') */
   currency: SupportedCurrency;
-  exchange: string;
-  timestamp: string;
+  /** Normalized price in EUR (portfolio base currency) */
+  priceEur: number;
+  /** Reference FX rate applied to convert currency -> EUR (1 for EUR) */
+  fxRateToEur: number;
+  /** Reference date of the FX conversion rate */
+  fxReferenceDate?: string | null;
+  /** Timestamp reported by the market venue, if available */
+  marketTime: string | null;
+  /** ISO timestamp when this quote was fetched by the server */
+  fetchedAt: string;
+  /** Internal prototype source identifier */
+  source: MarketSource;
+  /** Normalized quote status ('available' | 'live' | 'delayed' | 'stale' | 'fallback') */
   status: MarketDataStatus;
+  /** Optional legacy status alias */
+  legacyStatus?: MarketDataStatus;
+  /** Previous trading day close in native currency */
+  previousClose: number;
+  /** Absolute change vs previous close in native currency */
+  changeAbsolute: number;
+  /** Percentage change vs previous close */
+  changePercent: number;
+  /** Human-readable exchange / venue label */
+  exchange: string;
+  /** Effective display timestamp (marketTime or fetchedAt or fallbackPriceDate) */
+  timestamp: string;
+  /** Human-readable provider / source label */
   providerName: string;
+  /** True when the quote is a demonstration fallback rather than a retrieved market quote */
   isDemo: boolean;
+  /** Explicit fallback date when status === 'fallback' */
+  fallbackPriceDate?: string;
+}
+
+export interface MarketDataProvider {
+  getQuotes(assets: MarketAsset[]): Promise<MarketQuote[]>;
+}
+
+export interface MarketPriceRecord {
+  asset_id: string;
+  price: number;
+  currency: SupportedCurrency;
+  price_eur: number;
+  market_time: string | null;
+  fetched_at: string;
+  source: MarketSource;
+  status: NormalizedQuoteStatus;
+}
+
+export interface MarketPriceRepository {
+  getAll(): Promise<MarketPriceRecord[]>;
+  getByAssetId(assetId: string): Promise<MarketPriceRecord | null>;
+  saveMany(records: MarketPriceRecord[]): Promise<void>;
+  clear(): Promise<void>;
+}
+
+export interface SharedQuoteCache {
+  quotes: Record<string, MarketQuote>;
+  quoteList: MarketQuote[];
+  records: MarketPriceRecord[];
+  fxRateUsdToEur: number;
+  fxReferenceDate: string;
+  fxStatus: 'available' | 'stale' | 'fallback';
+  fetchedAt: string;
+  cacheDateKey: string;
+  expiresAt: number;
+  refreshCount: number;
 }
 
 export interface HistoricalPricePoint {
@@ -69,6 +176,7 @@ export interface ExchangeRateQuote {
   from: SupportedCurrency;
   to: SupportedCurrency;
   rate: number;
+  date?: string;
   timestamp: string;
   source: string;
   status: MarketDataStatus;
@@ -96,6 +204,10 @@ export interface ProviderStatusInfo {
   statusLabel: string;
   disclaimerLabel: string;
   lastCheckedAt: string;
+  fxRateUsdToEur?: number;
+  fxReferenceDate?: string;
+  hasStaleQuotes?: boolean;
+  hasFallbackQuotes?: boolean;
 }
 
 export type DemoMarketScenarioId =
@@ -114,10 +226,32 @@ export interface DemoMarketScenario {
 
 export interface MarketDataService {
   getProviderStatus(): Promise<ProviderStatusInfo>;
-  searchInstruments(query: string, filterType?: InstrumentAssetType | 'ALL'): Promise<InstrumentMetadata[]>;
+  searchInstruments(
+    query: string,
+    filterType?: InstrumentAssetType | 'ALL',
+  ): Promise<InstrumentMetadata[]>;
   getInstrumentDetails(symbol: string): Promise<InstrumentMetadata | null>;
-  getQuote(symbol: string, options?: { forceRefresh?: boolean }): Promise<MarketQuote>;
-  getBatchQuotes(symbols: string[], options?: { forceRefresh?: boolean }): Promise<Record<string, MarketQuote>>;
-  getHistoricalPrices(symbol: string, range: HistoricalRange): Promise<HistoricalSeries>;
-  getExchangeRate(from: SupportedCurrency, to: SupportedCurrency, options?: { forceRefresh?: boolean }): Promise<ExchangeRateQuote>;
+  getQuote(
+    symbol: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<MarketQuote>;
+  getBatchQuotes(
+    symbols: string[],
+    options?: { forceRefresh?: boolean },
+  ): Promise<Record<string, MarketQuote>>;
+  getCatalogueQuotes(options?: {
+    forceRefresh?: boolean;
+  }): Promise<Record<string, MarketQuote>>;
+  getCatalogueSnapshot(options?: {
+    forceRefresh?: boolean;
+  }): Promise<SharedQuoteCache>;
+  getHistoricalPrices(
+    symbol: string,
+    range: HistoricalRange,
+  ): Promise<HistoricalSeries>;
+  getExchangeRate(
+    from: SupportedCurrency,
+    to: SupportedCurrency,
+    options?: { forceRefresh?: boolean },
+  ): Promise<ExchangeRateQuote>;
 }

@@ -5,6 +5,7 @@ import {
   BookOpen,
   Clock,
   Info,
+  Lock,
 } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { formatEuro, formatPercent } from '@/lib/calculator';
@@ -14,8 +15,13 @@ import {
   formatSignedPercent,
   type ValuedPosition,
 } from '@/lib/depot-calculations';
+import { useDepot } from '@/lib/depot-context';
 import {
+  FALLBACK_QUOTE_NOTICE,
+  formatGermanDateLabel,
   formatMarketDataStatusBadge,
+  formatStaleQuoteNotice,
+  MARKET_DATA_SIMULATION_NOTICE,
   marketDataService,
 } from '@/lib/market-service';
 import type {
@@ -41,6 +47,8 @@ export function AssetDetailView({
   onStartBuy: (instrument: InstrumentMetadata) => void;
   onStartSell: (symbol: string) => void;
 }) {
+  const { isInstrumentUnlocked } = useDepot();
+  const unlocked = isInstrumentUnlocked(instrument.symbol);
   const gradientId = useId();
   const [range, setRange] = useState<HistoricalRange>('1Y');
   const [history, setHistory] = useState<HistoricalSeries | null>(null);
@@ -69,6 +77,7 @@ export function AssetDetailView({
   const statusBadge = formatMarketDataStatusBadge(
     quote?.status ?? 'unavailable',
     quote?.isDemo,
+    quote?.marketTime ?? quote?.timestamp,
   );
 
   const isDemoMode = Boolean(quote?.isDemo ?? history?.isDemo ?? true);
@@ -159,15 +168,17 @@ export function AssetDetailView({
               >
                 {formatOriginalCurrency(quote.price, quote.currency, 2)}
               </div>
+              {quote.currency !== 'EUR' && quote.priceEur && (
+                <div className="font-mono text-xs text-[#B7F34A]">
+                  ≈ {formatEuro(quote.priceEur, 2)}
+                </div>
+              )}
               <div className="text-xs text-[#A8B8AE]">
-                {quote.isDemo
-                  ? 'Beispieldaten – keine aktuellen Marktdaten'
-                  : statusBadge.shortText}{' '}
-                · Stand{' '}
-                {new Date(quote.timestamp).toLocaleTimeString('de-DE', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
+                {quote.isDemo || quote.status === 'fallback'
+                  ? FALLBACK_QUOTE_NOTICE
+                  : quote.status === 'stale'
+                    ? formatStaleQuoteNotice(quote.marketTime ?? quote.timestamp)
+                    : `${statusBadge.shortText} · Stand ${formatGermanDateLabel(quote.marketTime ?? quote.timestamp)}`}
               </div>
             </div>
           ) : (
@@ -176,6 +187,10 @@ export function AssetDetailView({
             </div>
           )}
         </div>
+
+        <p className="text-[11px] text-[#A8B8AE]">
+          {MARKET_DATA_SIMULATION_NOTICE}
+        </p>
 
         {/* Chart or Valid Empty State */}
         <div className="space-y-3 border-t border-[#26382E] pt-4">
@@ -189,7 +204,7 @@ export function AssetDetailView({
                 Noch nicht genügend Daten für einen Verlauf.
               </p>
               <p className="text-xs text-[#A8B8AE] max-w-md mx-auto leading-relaxed">
-                Im Modus „Beispieldaten – keine aktuellen Marktdaten“ wird ein stabiler Referenzkurs ohne erfundene Markthistorie verwendet.
+                {FALLBACK_QUOTE_NOTICE}
               </p>
               {histPoints.length >= 2 && (
                 <div className="pt-1">
@@ -312,14 +327,35 @@ export function AssetDetailView({
 
         {/* Primary Actions: Kaufen & Verkaufen (only when owned) */}
         <div className="flex flex-wrap items-center gap-3 pt-1">
-          <button
-            type="button"
-            data-testid="asset-detail-buy-btn"
-            onClick={() => onStartBuy(instrument)}
-            className="inline-flex min-h-[46px] flex-1 sm:flex-initial items-center justify-center gap-2 px-6 py-2.5 text-sm depot-btn-primary depot-focus whitespace-nowrap"
-          >
-            <span>Kaufen</span>
-          </button>
+          {unlocked ? (
+            <button
+              type="button"
+              data-testid="asset-detail-buy-btn"
+              onClick={() => onStartBuy(instrument)}
+              className="inline-flex min-h-[46px] flex-1 sm:flex-initial items-center justify-center gap-2 px-6 py-2.5 text-sm depot-btn-primary depot-focus whitespace-nowrap"
+            >
+              <span>Kaufen</span>
+            </button>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3 w-full">
+              <button
+                type="button"
+                disabled
+                data-testid="asset-detail-buy-btn"
+                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-xl border border-[#26382E] bg-[#0D1812] px-5 py-2.5 text-xs font-semibold text-[#84968C] cursor-not-allowed"
+              >
+                <Lock className="h-4 w-4" aria-hidden="true" />
+                <span>Gesperrt ({instrument.unlockRequirementText})</span>
+              </button>
+              <AppLink
+                to="/lernen"
+                className="inline-flex min-h-[46px] items-center justify-center gap-1.5 rounded-xl border border-[#B7F34A]/40 px-4 py-2.5 text-xs font-bold text-[#B7F34A] hover:underline"
+              >
+                <BookOpen className="h-4 w-4" aria-hidden="true" />
+                <span>Lektion zum Freischalten öffnen →</span>
+              </AppLink>
+            </div>
+          )}
 
           {holding && holding.quantity > 0 && (
             <button
@@ -363,7 +399,9 @@ export function AssetDetailView({
             </div>
 
             <div className="depot-card-secondary p-3">
-              <div className="text-xs text-[#A8B8AE]">Gewinn / Verlust</div>
+              <div className="text-xs text-[#A8B8AE]">
+                Virtueller Gewinn oder Verlust
+              </div>
               <div
                 className={`mt-0.5 font-mono text-sm font-bold tabular-nums inline-flex items-center gap-1 ${
                   holdingPositive
@@ -404,7 +442,7 @@ export function AssetDetailView({
             </div>
 
             <div className="depot-card-secondary p-3">
-              <div className="text-xs text-[#A8B8AE]">Referenzkurs</div>
+              <div className="text-xs text-[#A8B8AE]">Aktueller Kurs</div>
               <div className="mt-0.5 font-mono font-semibold tabular-nums text-[#F4F7F3]">
                 {formatEuro(holding.currentPriceEur, 2)}
               </div>
@@ -465,9 +503,12 @@ export function AssetDetailView({
             </strong>
           </div>
           <div className="depot-card-secondary p-3">
-            <span className="text-[#84968C] block">Branche / Fokus</span>
-            <strong className="text-[#F4F7F3] mt-0.5 block truncate" title={instrument.sector}>
-              {instrument.sector}
+            <span className="text-[#84968C] block">Freischaltung</span>
+            <strong
+              className="text-[#F4F7F3] mt-0.5 block truncate"
+              title={instrument.unlockRequirementText}
+            >
+              {instrument.unlockRequirementText ?? 'Direkt freigeschaltet'}
             </strong>
           </div>
         </div>

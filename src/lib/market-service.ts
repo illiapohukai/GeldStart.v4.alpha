@@ -1,4 +1,5 @@
 import {
+  CURATED_MARKET_ASSETS,
   DEMO_STATUS_LABEL,
   getDemoExchangeRate,
   getDemoHistoricalSeries,
@@ -16,9 +17,39 @@ import type {
   MarketDataStatus,
   MarketQuote,
   MarketServiceErrorCode,
+  NormalizedQuoteStatus,
   ProviderStatusInfo,
+  SharedQuoteCache,
   SupportedCurrency,
 } from './market-types';
+
+export const VIRTUAL_DEPOT_NOTICE = 'Virtuelles Übungsdepot – keine echten Käufe.';
+
+export const MARKET_DATA_SIMULATION_NOTICE =
+  'Kursstand: letzter verfügbarer Börsenkurs. Die Kurse sind nicht zwingend in Echtzeit und dienen ausschließlich der Simulation.';
+
+export const FALLBACK_QUOTE_NOTICE =
+  'Demowert aus der Ausgangsversion, kein aktueller Börsenkurs.';
+
+export function formatStaleQuoteNotice(marketTimeOrDate?: string | null): string {
+  const formattedDate = formatGermanDateLabel(marketTimeOrDate);
+  return `Letzter verfügbarer Kurs vom ${formattedDate}. Die heutige Aktualisierung war nicht möglich.`;
+}
+
+export function formatGermanDateLabel(isoOrDate?: string | null): string {
+  if (!isoOrDate) {
+    return new Date().toLocaleDateString('de-DE');
+  }
+  const parsed = new Date(isoOrDate);
+  if (Number.isNaN(parsed.getTime())) {
+    return isoOrDate;
+  }
+  return parsed.toLocaleDateString('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
 
 export class MarketServiceException extends Error {
   readonly code: MarketServiceErrorCode;
@@ -33,45 +64,55 @@ export class MarketServiceException extends Error {
 }
 
 export function formatMarketDataStatusBadge(
-  status: MarketDataStatus,
+  status: MarketDataStatus | NormalizedQuoteStatus,
   isDemo?: boolean,
+  marketTimeOrDate?: string | null,
 ): {
   shortText: string;
   detailText: string;
   tone: 'demo' | 'live' | 'delayed' | 'cached' | 'unavailable';
 } {
-  if (isDemo || status === 'demo') {
+  if (status === 'fallback' || isDemo || status === 'demo') {
     return {
       shortText: DEMO_STATUS_LABEL,
-      detailText:
-        'Bildungs-Demomodus: Alle Kurse sind pädagogische Beispieldaten und keine aktuellen Börsenkurse.',
+      detailText: FALLBACK_QUOTE_NOTICE,
       tone: 'demo',
     };
   }
 
+  if (status === 'stale') {
+    return {
+      shortText: `Veralteter Kurs (${formatGermanDateLabel(marketTimeOrDate)})`,
+      detailText: formatStaleQuoteNotice(marketTimeOrDate),
+      tone: 'cached',
+    };
+  }
+
   switch (status) {
+    case 'available':
+    case 'live':
     case 'real-time':
       return {
-        shortText: 'Echtzeit-Kursdaten',
-        detailText: 'Vom Kursdatenanbieter als Echtzeit-Indikation geliefert (kann von ausführbaren Börsenpreisen abweichen).',
+        shortText: 'Aktueller Börsenkurs (verzögert)',
+        detailText: MARKET_DATA_SIMULATION_NOTICE,
         tone: 'live',
       };
     case 'delayed':
       return {
-        shortText: 'Verzögerte Marktdaten (ca. 15 Min.)',
-        detailText: 'Börsenkurse werden zeitverzögert bereitgestellt und weichen von ausführbaren Marktpreisen ab.',
+        shortText: 'Verzögerte Börsenkurse',
+        detailText: MARKET_DATA_SIMULATION_NOTICE,
         tone: 'delayed',
       };
     case 'end-of-day':
       return {
         shortText: 'Tagesschlusskurs (End-of-Day)',
-        detailText: 'Letzter verfügbarer Börsenschlusskurs des Handelsplatzes.',
+        detailText: MARKET_DATA_SIMULATION_NOTICE,
         tone: 'delayed',
       };
     case 'cached':
       return {
-        shortText: 'Zwischengespeicherter Kurs (Cache)',
-        detailText: 'Zuletzt abgerufener Kurs aus dem Zwischenspeicher zur Schonung des Abfragelimits.',
+        shortText: 'Zwischengespeicherter Tageskurs',
+        detailText: MARKET_DATA_SIMULATION_NOTICE,
         tone: 'cached',
       };
     case 'unavailable':
@@ -84,23 +125,81 @@ export function formatMarketDataStatusBadge(
   }
 }
 
-const QUOTE_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes client-side cache
+const CATALOGUE_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes client-side shared snapshot TTL
+let sharedCatalogueSnapshot: { data: SharedQuoteCache; fetchedAtMs: number } | null = null;
+let pendingCataloguePromise: Promise<SharedQuoteCache> | null = null;
 const quoteCache = new Map<string, { quote: MarketQuote; fetchedAtMs: number }>();
 const fxCache = new Map<string, { fx: ExchangeRateQuote; fetchedAtMs: number }>();
 let cachedProviderStatus: ProviderStatusInfo | null = null;
 
 export function clearMarketClientCache(): void {
+  sharedCatalogueSnapshot = null;
+  pendingCataloguePromise = null;
   quoteCache.clear();
   fxCache.clear();
   cachedProviderStatus = null;
 }
 
+function buildOfflineCatalogueFallback(): SharedQuoteCache {
+  const nowIso = new Date().toISOString();
+  const dateKey = nowIso.slice(0, 10);
+  const demoFx = getDemoExchangeRate('USD', 'EUR');
+  const quotes: Record<string, MarketQuote> = {};
+  const quoteList: MarketQuote[] = [];
+
+  for (const asset of CURATED_MARKET_ASSETS) {
+    if (asset.assetType === 'cash') {
+      const cashQuote: MarketQuote = {
+        assetId: asset.id,
+        symbol: asset.id,
+        price: 1,
+        priceEur: 1,
+        fxRateToEur: 1,
+        fxReferenceDate: dateKey,
+        previousClose: 1,
+        changeAbsolute: 0,
+        changePercent: 0,
+        currency: 'EUR',
+        exchange: 'EUR',
+        marketTime: nowIso,
+        fetchedAt: nowIso,
+        timestamp: nowIso,
+        source: 'manual-demo',
+        status: 'available',
+        legacyStatus: 'real-time',
+        providerName: 'Virtuelles Bargeld (EUR)',
+        isDemo: false,
+      };
+      quotes[asset.id] = cashQuote;
+      quoteList.push(cashQuote);
+      continue;
+    }
+
+    const q = getDemoQuote(asset.id);
+    if (q) {
+      quotes[asset.id] = q;
+      quotes[asset.id.toUpperCase()] = q;
+      quoteList.push(q);
+    }
+  }
+
+  return {
+    quotes,
+    quoteList,
+    records: [],
+    fxRateUsdToEur: demoFx.rate,
+    fxReferenceDate: dateKey,
+    fxStatus: 'fallback',
+    fetchedAt: nowIso,
+    cacheDateKey: dateKey,
+    expiresAt: Date.now() + CATALOGUE_CACHE_TTL_MS,
+    refreshCount: 1,
+  };
+}
+
 class DefaultMarketDataService implements MarketDataService {
   private forcedSimulatedError: MarketServiceErrorCode | null = null;
 
-  /**
-   * Allows testing loading/error/rate-limit/offline UI states deterministically
-   */
   public setSimulatedErrorState(code: MarketServiceErrorCode | null): void {
     this.forcedSimulatedError = code;
   }
@@ -141,6 +240,78 @@ class DefaultMarketDataService implements MarketDataService {
     }
   }
 
+  async getCatalogueSnapshot(options?: { forceRefresh?: boolean }): Promise<SharedQuoteCache> {
+    this.checkSimulatedError();
+    const now = Date.now();
+
+    if (
+      !options?.forceRefresh &&
+      sharedCatalogueSnapshot &&
+      now - sharedCatalogueSnapshot.fetchedAtMs < CATALOGUE_CACHE_TTL_MS
+    ) {
+      return sharedCatalogueSnapshot.data;
+    }
+
+    if (!options?.forceRefresh && pendingCataloguePromise) {
+      return pendingCataloguePromise;
+    }
+
+    pendingCataloguePromise = (async () => {
+      try {
+        const res = await fetch('/api/market/quotes', {
+          headers: { Accept: 'application/json' },
+        });
+        if (res.ok) {
+          const payload = (await res.json()) as SharedQuoteCache;
+          if (payload && payload.quotes && typeof payload.quotes === 'object') {
+            sharedCatalogueSnapshot = { data: payload, fetchedAtMs: Date.now() };
+            for (const [key, q] of Object.entries(payload.quotes)) {
+              quoteCache.set(key.toUpperCase(), { quote: q, fetchedAtMs: Date.now() });
+            }
+            const isFallback = payload.fxStatus === 'fallback';
+            const fxQuote: ExchangeRateQuote = {
+              from: 'USD',
+              to: 'EUR',
+              rate: payload.fxRateUsdToEur,
+              date: payload.fxReferenceDate,
+              timestamp: payload.fetchedAt ?? new Date().toISOString(),
+              source: isFallback
+                ? DEMO_STATUS_LABEL
+                : 'Frankfurter EZB-Referenzkurs (USD/EUR)',
+              status: isFallback ? 'fallback' : 'delayed',
+              isDemo: isFallback,
+            };
+            fxCache.set('USD_EUR', { fx: fxQuote, fetchedAtMs: Date.now() });
+            return payload;
+          }
+        }
+      } catch {
+        // Fall through to offline fallback
+      }
+
+      if (sharedCatalogueSnapshot) {
+        return sharedCatalogueSnapshot.data;
+      }
+
+      const fallback = buildOfflineCatalogueFallback();
+      sharedCatalogueSnapshot = { data: fallback, fetchedAtMs: Date.now() };
+      return fallback;
+    })();
+
+    try {
+      return await pendingCataloguePromise;
+    } finally {
+      pendingCataloguePromise = null;
+    }
+  }
+
+  async getCatalogueQuotes(options?: {
+    forceRefresh?: boolean;
+  }): Promise<Record<string, MarketQuote>> {
+    const snapshot = await this.getCatalogueSnapshot(options);
+    return snapshot.quotes;
+  }
+
   async getProviderStatus(): Promise<ProviderStatusInfo> {
     if (cachedProviderStatus) {
       return cachedProviderStatus;
@@ -158,15 +329,16 @@ class DefaultMarketDataService implements MarketDataService {
             configured: data.configured,
             providerName:
               data.providerName ||
-              (data.configured ? 'Twelve Data API (Server-Proxy)' : DEMO_STATUS_LABEL),
+              (data.configured
+                ? 'Börse Frankfurt & Nasdaq (Prototyp-Marktdaten)'
+                : DEMO_STATUS_LABEL),
             defaultStatus: data.configured ? (data.defaultStatus ?? 'delayed') : 'demo',
             statusLabel:
               data.statusLabel ||
               (data.configured
-                ? 'Verzögerte / Tagesschluss-Marktdaten über Server-Proxy'
+                ? 'Verzögerte Börsenkurse (Börse Frankfurt / Nasdaq / EZB-Wechselkurs)'
                 : DEMO_STATUS_LABEL),
-            disclaimerLabel:
-              'Nur zu Bildungszwecken – keine Anlageberatung. Angezeigte Kurse können von ausführbaren Börsenpreisen abweichen.',
+            disclaimerLabel: MARKET_DATA_SIMULATION_NOTICE,
             lastCheckedAt: new Date().toISOString(),
           };
           return cachedProviderStatus;
@@ -182,8 +354,7 @@ class DefaultMarketDataService implements MarketDataService {
       providerName: DEMO_STATUS_LABEL,
       defaultStatus: 'demo',
       statusLabel: DEMO_STATUS_LABEL,
-      disclaimerLabel:
-        'Bildungs-Demomodus aktiv (kein Server-API-Schlüssel hinterlegt). Alle Kurse sind ausdrücklich als Beispieldaten gekennzeichnet.',
+      disclaimerLabel: FALLBACK_QUOTE_NOTICE,
       lastCheckedAt: new Date().toISOString(),
     };
     return cachedProviderStatus;
@@ -194,48 +365,12 @@ class DefaultMarketDataService implements MarketDataService {
     filterType: InstrumentAssetType | 'ALL' = 'ALL',
   ): Promise<InstrumentMetadata[]> {
     this.checkSimulatedError();
-    const status = await this.getProviderStatus();
-
-    if (status.mode === 'live_provider') {
-      const params = new URLSearchParams({
-        q: query.trim(),
-        type: filterType,
-      });
-      const res = await fetch(`/api/market/search?${params.toString()}`);
-      if (res.status === 429) {
-        throw new MarketServiceException(
-          'RATE_LIMIT',
-          'Abfragelimit bei der Wertpapiersuche erreicht. Bitte kurz warten.',
-          60,
-        );
-      }
-      if (!res.ok) {
-        throw new MarketServiceException(
-          'PROVIDER_ERROR',
-          'Wertpapiersuche über den Kursdatenanbieter fehlgeschlagen.',
-        );
-      }
-      const payload = (await res.json()) as { instruments?: InstrumentMetadata[] };
-      return payload.instruments ?? [];
-    }
-
     return searchDemoInstruments(query, filterType);
   }
 
   async getInstrumentDetails(symbol: string): Promise<InstrumentMetadata | null> {
     this.checkSimulatedError();
-    const localMeta = getDemoInstrumentMetadata(symbol);
-    if (localMeta) return localMeta;
-
-    const status = await this.getProviderStatus();
-    if (status.mode === 'live_provider') {
-      const results = await this.searchInstruments(symbol, 'ALL');
-      return (
-        results.find((r) => r.symbol.toUpperCase() === symbol.trim().toUpperCase()) ?? null
-      );
-    }
-
-    return null;
+    return getDemoInstrumentMetadata(symbol);
   }
 
   async getQuote(
@@ -248,57 +383,28 @@ class DefaultMarketDataService implements MarketDataService {
 
     if (!options?.forceRefresh) {
       const cached = quoteCache.get(normalized);
-      if (cached && now - cached.fetchedAtMs < QUOTE_CACHE_TTL_MS) {
-        return {
-          ...cached.quote,
-          status: cached.quote.isDemo ? 'demo' : 'cached',
-        };
+      if (cached && now - cached.fetchedAtMs < CATALOGUE_CACHE_TTL_MS) {
+        return cached.quote;
       }
     }
 
-    const status = await this.getProviderStatus();
-    if (status.mode === 'live_provider') {
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-        throw new MarketServiceException(
-          'OFFLINE',
-          'Du bist aktuell offline. Neue Marktdaten können nicht abgerufen werden.',
-        );
-      }
-
-      const res = await fetch(
-        `/api/market/quote?symbol=${encodeURIComponent(normalized)}`,
+    const catalogue = await this.getCatalogueSnapshot(options);
+    const quoteFromCatalogue =
+      catalogue.quotes[normalized] ??
+      Object.values(catalogue.quotes).find(
+        (q) => q.symbol.toUpperCase() === normalized || q.assetId.toUpperCase() === normalized,
       );
-      if (res.status === 429) {
-        throw new MarketServiceException(
-          'RATE_LIMIT',
-          'Das Abfragelimit des Kursdatenanbieters (Rate-Limit) wurde erreicht. Bitte warte ca. 60 Sekunden.',
-          60,
-        );
-      }
-      if (res.status === 404) {
-        throw new MarketServiceException(
-          'UNSUPPORTED_SYMBOL',
-          `Für das Symbol „${normalized}“ sind beim Anbieter keine Kursdaten verfügbar.`,
-        );
-      }
-      if (!res.ok) {
-        throw new MarketServiceException(
-          'PROVIDER_ERROR',
-          `Kursabruf für „${normalized}“ fehlgeschlagen (Anbieter-Fehler).`,
-        );
-      }
 
-      const quote = (await res.json()) as MarketQuote;
-      quoteCache.set(normalized, { quote, fetchedAtMs: now });
-      return quote;
+    if (quoteFromCatalogue) {
+      quoteCache.set(normalized, { quote: quoteFromCatalogue, fetchedAtMs: now });
+      return quoteFromCatalogue;
     }
 
-    // Explicit Demo Mode
     const demoQuote = getDemoQuote(normalized);
     if (!demoQuote) {
       throw new MarketServiceException(
         'UNSUPPORTED_SYMBOL',
-        `Das Wertpapier „${normalized}“ ist im kuratierten Bildungs-Demokatalog nicht enthalten.`,
+        `Das Wertpapier „${normalized}“ ist im kuratierten Bildungskatalog nicht enthalten.`,
       );
     }
     quoteCache.set(normalized, { quote: demoQuote, fetchedAtMs: now });
@@ -310,12 +416,22 @@ class DefaultMarketDataService implements MarketDataService {
     options?: { forceRefresh?: boolean },
   ): Promise<Record<string, MarketQuote>> {
     this.checkSimulatedError();
-    const unique = Array.from(new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean)));
+    const unique = Array.from(
+      new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean)),
+    );
+    const catalogue = await this.getCatalogueSnapshot(options);
     const result: Record<string, MarketQuote> = {};
 
     for (const sym of unique) {
-      const q = await this.getQuote(sym, options);
-      result[sym] = q;
+      const found =
+        catalogue.quotes[sym] ??
+        Object.values(catalogue.quotes).find(
+          (q) => q.symbol.toUpperCase() === sym || q.assetId.toUpperCase() === sym,
+        ) ??
+        getDemoQuote(sym);
+      if (found) {
+        result[sym] = found;
+      }
     }
     return result;
   }
@@ -329,23 +445,16 @@ class DefaultMarketDataService implements MarketDataService {
     const status = await this.getProviderStatus();
 
     if (status.mode === 'live_provider') {
-      const res = await fetch(
-        `/api/market/history?symbol=${encodeURIComponent(normalized)}&range=${encodeURIComponent(range)}`,
-      );
-      if (res.status === 429) {
-        throw new MarketServiceException(
-          'RATE_LIMIT',
-          'Abfragelimit beim Laden der Kurshistorie erreicht.',
-          60,
+      try {
+        const res = await fetch(
+          `/api/market/history?symbol=${encodeURIComponent(normalized)}&range=${encodeURIComponent(range)}`,
         );
+        if (res.ok) {
+          return (await res.json()) as HistoricalSeries;
+        }
+      } catch {
+        // Fallback to local educational history anchored to current cached quote
       }
-      if (!res.ok) {
-        throw new MarketServiceException(
-          'PROVIDER_ERROR',
-          'Historische Kursdaten konnten vom Anbieter nicht geladen werden.',
-        );
-      }
-      return (await res.json()) as HistoricalSeries;
     }
 
     const demoHistory = getDemoHistoricalSeries(normalized, range);
@@ -380,30 +489,47 @@ class DefaultMarketDataService implements MarketDataService {
     const now = Date.now();
     if (!options?.forceRefresh) {
       const cached = fxCache.get(key);
-      if (cached && now - cached.fetchedAtMs < QUOTE_CACHE_TTL_MS) {
+      if (cached && now - cached.fetchedAtMs < CATALOGUE_CACHE_TTL_MS) {
         return cached.fx;
       }
     }
 
-    const status = await this.getProviderStatus();
-    if (status.mode === 'live_provider') {
-      const res = await fetch(
-        `/api/market/fx?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
-      );
-      if (res.status === 429) {
-        throw new MarketServiceException(
-          'RATE_LIMIT',
-          'Abfragelimit beim Laden des Wechselkurses erreicht.',
-          60,
-        );
-      }
-      if (!res.ok) {
-        throw new MarketServiceException(
-          'PROVIDER_ERROR',
-          `Wechselkurs ${from}/${to} konnte nicht abgerufen werden.`,
-        );
-      }
-      const fx = (await res.json()) as ExchangeRateQuote;
+    const catalogue = await this.getCatalogueSnapshot(options);
+    const isFallback = catalogue.fxStatus === 'fallback';
+    const fxSource = isFallback
+      ? DEMO_STATUS_LABEL
+      : 'Frankfurter EZB-Referenzkurs (USD/EUR)';
+
+    if (from === 'USD' && to === 'EUR') {
+      const fx: ExchangeRateQuote = {
+        from: 'USD',
+        to: 'EUR',
+        rate: catalogue.fxRateUsdToEur,
+        date: catalogue.fxReferenceDate,
+        timestamp: catalogue.fetchedAt ?? new Date().toISOString(),
+        source: fxSource,
+        status: isFallback ? 'fallback' : 'delayed',
+        isDemo: isFallback,
+      };
+      fxCache.set(key, { fx, fetchedAtMs: now });
+      return fx;
+    }
+
+    if (from === 'EUR' && to === 'USD') {
+      const rate =
+        catalogue.fxRateUsdToEur > 0
+          ? Math.round((1 / catalogue.fxRateUsdToEur) * 10000) / 10000
+          : 1.087;
+      const fx: ExchangeRateQuote = {
+        from: 'EUR',
+        to: 'USD',
+        rate,
+        date: catalogue.fxReferenceDate,
+        timestamp: catalogue.fetchedAt ?? new Date().toISOString(),
+        source: fxSource,
+        status: isFallback ? 'fallback' : 'delayed',
+        isDemo: isFallback,
+      };
       fxCache.set(key, { fx, fetchedAtMs: now });
       return fx;
     }

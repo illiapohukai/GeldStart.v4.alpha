@@ -310,10 +310,10 @@ export function MehrPage() {
             {openSection === 'marketdata' && (
               <div className="border-t border-border bg-secondary/30 p-5 text-sm text-muted-foreground space-y-2 leading-relaxed">
                 <p>
-                  Im statischen Betrieb (z. B. auf GitHub Pages oder ohne hinterlegten Server-API-Schlüssel) arbeitet das Übungsdepot automatisch im transparent gekennzeichneten <strong>Lern-Modus („Beispieldaten – keine aktuellen Marktdaten“)</strong> mit realistischen historischen Verläufen.
+                  Im Schulprototyp ruft der Server verzögerte Börsenkurse zentral für den kuratierten Bildungskatalog über <strong>Börse Frankfurt (Xetra)</strong>, <strong>Nasdaq</strong> sowie den <strong>EZB-Referenzwechselkurs (Frankfurter API)</strong> ab und speichert sie in einem gemeinsamen Tages-Cache.
                 </p>
                 <p>
-                  Es wird zu keinem Zeitpunkt echtes Geld eingezahlt oder gehandelt. Alle Transaktionen im Übungsdepot sind rein virtuell.
+                  Im statischen Betrieb ohne Server-Endpunkt arbeitet das Übungsdepot automatisch mit klar gekennzeichneten Demowerten aus der Ausgangsversion. Es wird zu keinem Zeitpunkt echtes Geld eingezahlt oder gehandelt.
                 </p>
               </div>
             )}
@@ -443,7 +443,7 @@ export function MehrPage() {
                   Virtuelles Übungsdepot zurücksetzen
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Aktuell {valuation.valuedPositions.length} Positionen im Depot. Setzt das Übungsdepot komplett zurück (Lernfortschritt bleibt erhalten).
+                  Aktuell {valuation.valuedPositions.length} Positionen im Depot. Setzt das Übungsdepot komplett auf 5.000,00 € Spielgeld zurück (Lernfortschritt bleibt erhalten).
                 </p>
               </div>
 
@@ -468,7 +468,7 @@ export function MehrPage() {
                 <div className="flex items-start gap-2.5">
                   <AlertTriangle className="h-5 w-5 text-warning-foreground shrink-0 mt-0.5" />
                   <p className="text-sm font-semibold text-foreground">
-                    Möchtest du alle virtuellen Positionen und Transaktionen löschen und wieder mit 10.000 € Spielgeld starten? (Dein Lernfortschritt bleibt erhalten.)
+                    Möchtest du alle virtuellen Positionen und Transaktionen löschen und wieder mit 5.000,00 € Spielgeld starten? (Dein Lernfortschritt bleibt erhalten.)
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2.5">
@@ -498,7 +498,7 @@ export function MehrPage() {
                 className="flex items-center gap-2 rounded-xl bg-accent/25 px-4 py-2.5 text-sm font-bold text-accent-foreground"
               >
                 <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
-                <span>Dein Übungsdepot wurde auf 10.000 € Startguthaben zurückgesetzt.</span>
+                <span>Dein Übungsdepot wurde auf 5.000,00 € Startguthaben zurückgesetzt.</span>
               </div>
             )}
           </div>

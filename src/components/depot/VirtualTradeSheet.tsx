@@ -5,8 +5,10 @@ import {
   CheckCircle2,
   HelpCircle,
   Info,
+  Lock,
   Search,
   ShieldAlert,
+  Unlock,
   X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -24,8 +26,13 @@ import {
 import { useDepot } from '@/lib/depot-context';
 import { getDemoQuote } from '@/lib/market-demo-adapter';
 import {
+  FALLBACK_QUOTE_NOTICE,
+  formatGermanDateLabel,
   formatMarketDataStatusBadge,
+  formatStaleQuoteNotice,
+  MARKET_DATA_SIMULATION_NOTICE,
   marketDataService,
+  VIRTUAL_DEPOT_NOTICE,
 } from '@/lib/market-service';
 import type {
   ExchangeRateQuote,
@@ -33,6 +40,7 @@ import type {
   InstrumentMetadata,
   MarketQuote,
 } from '@/lib/market-types';
+import { AppLink } from '@/lib/router';
 
 function getCompactBadgeCode(assetType: InstrumentAssetType): string {
   switch (assetType) {
@@ -56,7 +64,14 @@ export function VirtualBuyFlowView({
   onClose: () => void;
   onOpenAssetDetail: (instrument: InstrumentMetadata, quote: MarketQuote | null) => void;
 }) {
-  const { portfolio, buyInstrumentVirtually } = useDepot();
+  const {
+    portfolio,
+    catalogueQuotes,
+    usdToEurRate,
+    fxReferenceDate,
+    isInstrumentUnlocked,
+    buyInstrumentVirtually,
+  } = useDepot();
   const [step, setStep] = useState<'select' | 'configure' | 'preview' | 'success'>(
     initialInstrument ? 'configure' : 'select',
   );
@@ -114,6 +129,29 @@ export function VirtualBuyFlowView({
 
   useEffect(() => {
     if (!selectedInstrument) return;
+    const upper = selectedInstrument.symbol.toUpperCase();
+    const sharedQ =
+      catalogueQuotes[upper] ?? portfolio.lastKnownQuotes[upper];
+
+    if (sharedQ) {
+      setQuote(sharedQ);
+      if (selectedInstrument.currency !== 'EUR') {
+        setFxQuote({
+          from: selectedInstrument.currency,
+          to: 'EUR',
+          rate: usdToEurRate,
+          timestamp: fxReferenceDate ?? sharedQ.fetchedAt ?? sharedQ.timestamp,
+          source: 'Frankfurter / EZB-Referenzkurs',
+          status: sharedQ.isDemo ? 'demo' : 'delayed',
+          isDemo: sharedQ.isDemo,
+        });
+      } else {
+        setFxQuote(null);
+      }
+      setLoadingQuote(false);
+      return;
+    }
+
     let active = true;
     setLoadingQuote(true);
     Promise.all([
@@ -130,7 +168,7 @@ export function VirtualBuyFlowView({
       })
       .catch(() => {
         if (active) {
-          setQuote(null);
+          setQuote(getDemoQuote(selectedInstrument.symbol));
         }
       })
       .finally(() => {
@@ -139,7 +177,7 @@ export function VirtualBuyFlowView({
     return () => {
       active = false;
     };
-  }, [selectedInstrument]);
+  }, [selectedInstrument, catalogueQuotes, portfolio.lastKnownQuotes, usdToEurRate, fxReferenceDate]);
 
   const numericValue = Number(rawInputValue.replace(',', '.'));
   const buyPreview = selectedInstrument
@@ -152,8 +190,9 @@ export function VirtualBuyFlowView({
           value: Number.isFinite(numericValue) ? numericValue : 0,
         },
         fxRateToEur:
-          selectedInstrument.currency === 'EUR' ? 1 : (fxQuote?.rate ?? 0.9215),
+          selectedInstrument.currency === 'EUR' ? 1 : (fxQuote?.rate ?? usdToEurRate),
         fxTimestamp: fxQuote?.timestamp ?? quote?.timestamp,
+        enforceUnlock: true,
       })
     : null;
 
@@ -175,6 +214,7 @@ export function VirtualBuyFlowView({
   };
 
   const handleSelectInstrumentToConfigure = (inst: InstrumentMetadata) => {
+    if (!isInstrumentUnlocked(inst.symbol)) return;
     setPreviewDrawerInstrument(null);
     setSelectedInstrument(inst);
     if (portfolio.cashEur < 500 && portfolio.cashEur > 0) {
@@ -184,7 +224,8 @@ export function VirtualBuyFlowView({
   };
 
   const drawerQuote = previewDrawerInstrument
-    ? portfolio.lastKnownQuotes[previewDrawerInstrument.symbol.toUpperCase()] ??
+    ? catalogueQuotes[previewDrawerInstrument.symbol.toUpperCase()] ??
+      portfolio.lastKnownQuotes[previewDrawerInstrument.symbol.toUpperCase()] ??
       getDemoQuote(previewDrawerInstrument.symbol)
     : null;
 
@@ -197,13 +238,13 @@ export function VirtualBuyFlowView({
       <div className="flex items-center justify-between gap-3 border-b border-[var(--depot-border)] pb-4">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--depot-accent-lime)]">
-            Simulation · Kein echtes Geld
+            {VIRTUAL_DEPOT_NOTICE}
           </p>
           <h2
             id="virtual-buy-heading"
             className="text-lg sm:text-xl font-bold text-[var(--depot-text-primary)]"
           >
-            {step === 'select' && 'Wertpapier suchen'}
+            {step === 'select' && 'Wertpapier im Bildungskatalog wählen'}
             {step === 'configure' && 'Betrag wählen'}
             {step === 'preview' && 'Order prüfen'}
             {step === 'success' && 'Virtueller Kauf ausgeführt'}
@@ -220,7 +261,7 @@ export function VirtualBuyFlowView({
         </button>
       </div>
 
-      {/* STEP 1: Search & Select Instrument */}
+      {/* STEP 1: Search & Select Curated Instrument */}
       {step === 'select' && (
         <div className="space-y-4">
           <div className="space-y-3">
@@ -231,10 +272,10 @@ export function VirtualBuyFlowView({
               />
               <input
                 type="search"
-                aria-label="Name oder Symbol suchen"
+                aria-label="Im kuratierten Katalog suchen"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Name oder Symbol suchen …"
+                placeholder="Im kuratierten Bildungskatalog filtern (z. B. MSCI World, SAP, NVDA) …"
                 className="w-full min-h-[46px] rounded-xl border border-[var(--depot-border)] bg-[var(--depot-bg-secondary)] pl-10 pr-4 py-2 text-sm text-[var(--depot-text-primary)] placeholder:text-[var(--depot-text-muted)] focus:border-[var(--depot-accent-lime)] focus:outline-none"
               />
             </div>
@@ -283,7 +324,7 @@ export function VirtualBuyFlowView({
           ) : instruments.length === 0 ? (
             <div className="rounded-xl border border-[var(--depot-border)] bg-[var(--depot-bg-secondary)] p-6 text-center space-y-1.5">
               <p className="text-sm font-bold text-[var(--depot-text-primary)]">
-                Kein passendes Wertpapier gefunden.
+                Kein passendes Wertpapier im Bildungskatalog gefunden.
               </p>
               <p className="text-xs text-[var(--depot-text-secondary)]">
                 Probiere Begriffe wie „MSCI World“, „SAP“, „NVDA“ oder „Gold“.
@@ -292,15 +333,31 @@ export function VirtualBuyFlowView({
           ) : (
             <div className="divide-y divide-[var(--depot-border)] rounded-xl border border-[var(--depot-border)] bg-[var(--depot-bg-secondary)] overflow-hidden">
               {instruments.map((inst) => {
+                const upper = inst.symbol.toUpperCase();
                 const rowQuote =
-                  portfolio.lastKnownQuotes[inst.symbol.toUpperCase()] ??
+                  catalogueQuotes[upper] ??
+                  portfolio.lastKnownQuotes[upper] ??
                   getDemoQuote(inst.symbol);
                 const badgeCode = getCompactBadgeCode(inst.assetType);
+                const unlocked = isInstrumentUnlocked(inst.symbol);
+                const eurPrice =
+                  rowQuote?.priceEur && rowQuote.priceEur > 0
+                    ? rowQuote.priceEur
+                    : rowQuote
+                      ? inst.currency === 'EUR'
+                        ? rowQuote.price
+                        : roundCurrency(rowQuote.price * usdToEurRate)
+                      : 0;
 
                 return (
                   <div
                     key={inst.symbol}
-                    className="p-3.5 sm:px-4 flex items-center justify-between gap-3 hover:bg-[var(--depot-surface-elevated)]/60 transition-colors"
+                    data-testid={`instrument-row-${inst.symbol}`}
+                    className={`p-3.5 sm:px-4 flex items-center justify-between gap-3 transition-colors ${
+                      unlocked
+                        ? 'hover:bg-[var(--depot-surface-elevated)]/60'
+                        : 'opacity-75 bg-[var(--depot-bg-secondary)]/40'
+                    }`}
                   >
                     <button
                       type="button"
@@ -311,13 +368,27 @@ export function VirtualBuyFlowView({
                         {badgeCode}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="font-mono text-sm font-bold text-[var(--depot-text-primary)]">
                             {inst.symbol}
                           </span>
                           <span className="text-[11px] text-[var(--depot-text-muted)]">
                             {inst.exchange} · {inst.currency}
                           </span>
+                          {unlocked ? (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-[var(--depot-accent-lime)]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--depot-accent-lime)]">
+                              <Unlock className="h-3 w-3" aria-hidden="true" />
+                              <span>Freigeschaltet</span>
+                            </span>
+                          ) : (
+                            <span
+                              data-testid={`locked-badge-${inst.symbol}`}
+                              className="inline-flex items-center gap-1 rounded-md border border-[var(--depot-border)] bg-[var(--depot-surface)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--depot-text-muted)]"
+                            >
+                              <Lock className="h-3 w-3" aria-hidden="true" />
+                              <span>{inst.unlockRequirementText}</span>
+                            </span>
+                          )}
                         </div>
                         <div className="text-xs font-medium text-[var(--depot-text-secondary)] truncate">
                           {inst.name}
@@ -332,23 +403,36 @@ export function VirtualBuyFlowView({
                         className="text-right"
                       >
                         <div className="font-mono text-sm font-bold tabular-nums text-[var(--depot-text-primary)]">
-                          {rowQuote
-                            ? formatOriginalCurrency(rowQuote.price, inst.currency, 2)
-                            : '—'}
+                          {eurPrice > 0 ? formatEuro(eurPrice, 2) : '—'}
                         </div>
                         <div className="text-[10px] text-[var(--depot-text-muted)]">
-                          {rowQuote?.isDemo === false ? 'Marktkurs' : 'Beispieldaten'}
+                          {rowQuote?.isDemo === false
+                            ? `Stand ${formatGermanDateLabel(rowQuote.marketTime ?? rowQuote.timestamp)}`
+                            : 'Demowert'}
                         </div>
                       </button>
 
-                      <button
-                        type="button"
-                        data-testid={`select-instrument-${inst.symbol}`}
-                        onClick={() => handleSelectInstrumentToConfigure(inst)}
-                        className="depot-btn-lime min-h-[38px] rounded-xl px-3 py-1.5 text-xs font-bold inline-flex items-center gap-1"
-                      >
-                        <span>Auswählen</span>
-                      </button>
+                      {unlocked ? (
+                        <button
+                          type="button"
+                          data-testid={`select-instrument-${inst.symbol}`}
+                          onClick={() => handleSelectInstrumentToConfigure(inst)}
+                          className="depot-btn-lime min-h-[38px] rounded-xl px-3 py-1.5 text-xs font-bold inline-flex items-center gap-1"
+                        >
+                          <span>Auswählen</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled
+                          data-testid={`select-instrument-${inst.symbol}`}
+                          title={inst.unlockRequirementText}
+                          className="min-h-[38px] rounded-xl border border-[var(--depot-border)] bg-[var(--depot-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--depot-text-muted)] cursor-not-allowed inline-flex items-center gap-1"
+                        >
+                          <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+                          <span>Gesperrt</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -415,11 +499,28 @@ export function VirtualBuyFlowView({
                 </div>
                 <span className="text-[11px] text-[var(--depot-text-muted)]">
                   {drawerQuote
-                    ? formatMarketDataStatusBadge(drawerQuote.status, drawerQuote.isDemo)
-                        .shortText
-                    : 'Beispieldaten – keine aktuellen Marktdaten'}
+                    ? formatMarketDataStatusBadge(
+                        drawerQuote.status,
+                        drawerQuote.isDemo,
+                        drawerQuote.marketTime ?? drawerQuote.timestamp,
+                      ).shortText
+                    : FALLBACK_QUOTE_NOTICE}
                 </span>
               </div>
+
+              {!isInstrumentUnlocked(previewDrawerInstrument.symbol) && (
+                <div className="rounded-xl border border-[var(--depot-warning)]/40 bg-[var(--depot-warning)]/10 p-3 text-xs text-[var(--depot-text-primary)] flex items-center justify-between gap-2">
+                  <span>
+                    Gesperrt: <strong>{previewDrawerInstrument.unlockRequirementText}</strong>
+                  </span>
+                  <AppLink
+                    to="/lernen"
+                    className="font-bold text-[var(--depot-accent-lime)] underline shrink-0"
+                  >
+                    Zu den Lektionen →
+                  </AppLink>
+                </div>
+              )}
 
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                 <button
@@ -429,14 +530,16 @@ export function VirtualBuyFlowView({
                 >
                   Alle Details
                 </button>
-                <button
-                  type="button"
-                  onClick={() => handleSelectInstrumentToConfigure(previewDrawerInstrument)}
-                  className="depot-btn-lime min-h-[40px] rounded-xl px-4 py-2 text-xs font-bold inline-flex items-center gap-1.5"
-                >
-                  <span>Auswählen</span>
-                  <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
+                {isInstrumentUnlocked(previewDrawerInstrument.symbol) && (
+                  <button
+                    type="button"
+                    onClick={() => handleSelectInstrumentToConfigure(previewDrawerInstrument)}
+                    className="depot-btn-lime min-h-[40px] rounded-xl px-4 py-2 text-xs font-bold inline-flex items-center gap-1.5"
+                  >
+                    <span>Auswählen</span>
+                    <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -457,7 +560,9 @@ export function VirtualBuyFlowView({
               </h3>
             </div>
             <div className="sm:text-right">
-              <div className="text-xs text-[var(--depot-text-muted)]">Verfügbar</div>
+              <div className="text-xs text-[var(--depot-text-muted)]">
+                Verfügbares Spielgeld
+              </div>
               <div className="font-mono text-base font-bold tabular-nums text-[var(--depot-accent-lime)]">
                 {formatEuro(portfolio.cashEur, 2)}
               </div>
@@ -654,9 +759,18 @@ export function VirtualBuyFlowView({
             </div>
 
             <div className="flex items-center justify-between gap-3 border-b border-[var(--depot-border)] pb-2.5">
-              <span className="text-[var(--depot-text-secondary)]">Cash danach</span>
+              <span className="text-[var(--depot-text-secondary)]">
+                Verfügbares Spielgeld danach
+              </span>
               <span className="font-mono font-semibold tabular-nums text-[var(--depot-text-primary)] shrink-0">
                 {formatEuro(buyPreview.remainingCashEur, 2)}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 border-b border-[var(--depot-border)] pb-2.5">
+              <span className="text-[var(--depot-text-secondary)]">Kursstand</span>
+              <span className="font-mono text-xs text-[var(--depot-text-muted)] shrink-0">
+                {formatGermanDateLabel(buyPreview.priceTimestamp)}
               </span>
             </div>
 
@@ -667,6 +781,14 @@ export function VirtualBuyFlowView({
               </span>
             </div>
           </div>
+
+          <p className="text-[11px] text-[var(--depot-text-muted)]">
+            {buyPreview.isDemo
+              ? FALLBACK_QUOTE_NOTICE
+              : buyPreview.dataStatus === 'stale'
+                ? formatStaleQuoteNotice(buyPreview.priceTimestamp)
+                : MARKET_DATA_SIMULATION_NOTICE}
+          </p>
 
           {/* Short educational note */}
           <div className="rounded-xl border border-[var(--depot-border)] bg-[var(--depot-surface-elevated)] p-4 flex items-start gap-2.5 text-xs leading-relaxed">
@@ -723,7 +845,11 @@ export function VirtualBuyFlowView({
               <strong className="font-mono text-[var(--depot-text-primary)]">
                 {completedTx.quantity.toLocaleString('de-DE')} Stück
               </strong>{' '}
-              im Wert von{' '}
+              zum Kurs von{' '}
+              <strong className="font-mono text-[var(--depot-text-primary)]">
+                {formatEuro(completedTx.executionPriceEur ?? completedTx.priceEur, 2)}
+              </strong>{' '}
+              im Gesamtwert von{' '}
               <strong className="font-mono text-[var(--depot-text-primary)]">
                 {formatEuro(completedTx.totalAmountEur, 2)}
               </strong>{' '}
@@ -806,7 +932,8 @@ export function VirtualSellFlowView({
   initialSymbol?: string | null;
   onClose: () => void;
 }) {
-  const { portfolio, valuation, sellInstrumentVirtually } = useDepot();
+  const { portfolio, valuation, catalogueQuotes, sellInstrumentVirtually } =
+    useDepot();
   const [selectedSymbol, setSelectedSymbol] = useState<string>(
     initialSymbol ?? valuation.valuedPositions[0]?.symbol ?? '',
   );
@@ -829,15 +956,19 @@ export function VirtualSellFlowView({
     }
   }, [selectedPos?.symbol]);
 
-  const quote = selectedPos
-    ? portfolio.lastKnownQuotes[selectedPos.symbol.toUpperCase()] ?? {
+  const quote: MarketQuote | null = selectedPos
+    ? catalogueQuotes[selectedPos.symbol.toUpperCase()] ??
+      portfolio.lastKnownQuotes[selectedPos.symbol.toUpperCase()] ?? {
         symbol: selectedPos.symbol,
         price: selectedPos.currentPriceOriginal,
+        priceEur: selectedPos.currentPriceEur,
         previousClose: selectedPos.currentPriceOriginal,
         changeAbsolute: 0,
         changePercent: 0,
         currency: selectedPos.currency,
         exchange: selectedPos.exchange,
+        marketTime: selectedPos.priceTimestamp,
+        fetchedAt: selectedPos.quoteFetchedAt,
         timestamp: selectedPos.priceTimestamp,
         status: selectedPos.dataStatus,
         providerName: 'Referenzkurs',
@@ -873,7 +1004,7 @@ export function VirtualSellFlowView({
       <div className="flex items-center justify-between gap-3 border-b border-[var(--depot-border)] pb-4">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--depot-accent-lime)]">
-            Virtueller Verkauf · Simulation
+            {VIRTUAL_DEPOT_NOTICE}
           </p>
           <h2
             id="virtual-sell-heading"
@@ -1065,7 +1196,9 @@ export function VirtualSellFlowView({
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-[var(--depot-text-secondary)]">Cash danach</span>
+                    <span className="text-[var(--depot-text-secondary)]">
+                      Verfügbares Spielgeld danach
+                    </span>
                     <span className="font-mono font-bold tabular-nums text-[var(--depot-accent-lime)] shrink-0">
                       {formatEuro(sellPreview.updatedCashEur, 2)}
                     </span>
@@ -1079,7 +1212,7 @@ export function VirtualSellFlowView({
                   aria-hidden="true"
                 />
                 <span>
-                  Simulierter Verkauf ohne echte Orderausführung.
+                  {VIRTUAL_DEPOT_NOTICE} {MARKET_DATA_SIMULATION_NOTICE}
                 </span>
               </div>
 

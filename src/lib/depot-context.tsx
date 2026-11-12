@@ -20,19 +20,24 @@ import {
   type VirtualBuyInput,
 } from './depot-calculations';
 import {
+  DEFAULT_INITIAL_CAPITAL_EUR,
   initializeVirtualPortfolio,
   loadDepotState,
   resetDepotStorage,
   saveDepotState,
 } from './depot-storage';
 import {
-  DEMO_SCENARIOS,
   DEMO_STATUS_LABEL,
   getActiveDemoScenario,
+  getDemoInstrumentMetadata,
+  getUnlockedAssetIds,
+  isAssetUnlocked,
   setActiveDemoScenario,
+  UNLOCK_NOTIFICATION_TEXT,
 } from './market-demo-adapter';
 import {
   clearMarketClientCache,
+  MARKET_DATA_SIMULATION_NOTICE,
   marketDataService,
   MarketServiceException,
 } from './market-service';
@@ -43,7 +48,9 @@ import type {
   MarketQuote,
   MarketServiceError,
   ProviderStatusInfo,
+  SharedQuoteCache,
 } from './market-types';
+import { loadProgress } from './storage';
 
 interface DepotContextValue {
   portfolio: DepotPortfolioState;
@@ -51,10 +58,16 @@ interface DepotContextValue {
   weeklyReport: DeterministicWeeklyReport;
   providerStatus: ProviderStatusInfo;
   activeScenario: DemoMarketScenario;
+  catalogueQuotes: Record<string, MarketQuote>;
+  usdToEurRate: number;
+  fxReferenceDate: string | null;
+  unlockedAssets: string[];
+  newlyUnlockedNotice: string | null;
+  isInstrumentUnlocked: (symbol: string) => boolean;
   isRefreshing: boolean;
   marketError: MarketServiceError | null;
   lastRefreshedAt: string | null;
-  createPortfolio: (startingCashEur: number, portfolioName?: string) => void;
+  createPortfolio: (startingCashEur?: number, portfolioName?: string) => void;
   buyInstrumentVirtually: (params: {
     instrument: InstrumentMetadata;
     quote: MarketQuote;
@@ -69,18 +82,21 @@ interface DepotContextValue {
     fxRateToEur?: number;
   }) => DepotTransaction;
   refreshPortfolioQuotes: (demoScenarioId?: DemoMarketScenarioId) => Promise<void>;
+  syncUnlockedAssetsFromLessons: (
+    completedLessons?: string[] | Record<string, boolean>,
+  ) => void;
+  dismissUnlockedNotice: () => void;
   resetDepot: () => void;
   clearMarketError: () => void;
 }
 
 const DEFAULT_PROVIDER_STATUS: ProviderStatusInfo = {
-  mode: 'demo',
-  configured: false,
-  providerName: DEMO_STATUS_LABEL,
-  defaultStatus: 'demo',
-  statusLabel: DEMO_STATUS_LABEL,
-  disclaimerLabel:
-    'Nur zu Bildungszwecken – keine Anlageberatung. Alle Käufe und Verkäufe sind Simulationen.',
+  mode: 'live_provider',
+  configured: true,
+  providerName: 'Börse Frankfurt & Nasdaq (Prototyp-Marktdaten)',
+  defaultStatus: 'delayed',
+  statusLabel: 'Verzögerte Börsenkurse (Börse Frankfurt / Nasdaq / EZB-Wechselkurs)',
+  disclaimerLabel: MARKET_DATA_SIMULATION_NOTICE,
   lastCheckedAt: new Date().toISOString(),
 };
 
@@ -89,16 +105,26 @@ const DepotContext = createContext<DepotContextValue | null>(null);
 export function DepotProvider({ children }: { children: ReactNode }) {
   const [portfolio, setPortfolio] = useState<DepotPortfolioState>(() => {
     const loaded = loadDepotState();
-    if (!loaded.isInitialized && typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('autostart') === '1') {
-        const autoCreated = initializeVirtualPortfolio({
-          startingCashEur: 5000,
-          portfolioName: 'Mein Übungsdepot',
-        });
-        saveDepotState(autoCreated);
-        return autoCreated;
-      }
+    const progress = loadProgress();
+    const unlockedFromLessons = getUnlockedAssetIds(progress.completedLessons);
+
+    if (!loaded.isInitialized) {
+      const autoCreated = initializeVirtualPortfolio({
+        startingCashEur: DEFAULT_INITIAL_CAPITAL_EUR,
+        portfolioName: 'Mein Übungsdepot',
+        unlockedAssets: unlockedFromLessons,
+      });
+      saveDepotState(autoCreated);
+      return autoCreated;
+    }
+
+    const mergedUnlocked = Array.from(
+      new Set([...(loaded.unlockedAssets ?? []), ...unlockedFromLessons]),
+    );
+    if (mergedUnlocked.length !== (loaded.unlockedAssets ?? []).length) {
+      const updated = { ...loaded, unlockedAssets: mergedUnlocked };
+      saveDepotState(updated);
+      return updated;
     }
     return loaded;
   });
@@ -109,28 +135,13 @@ export function DepotProvider({ children }: { children: ReactNode }) {
   const [activeScenario, setActiveScenario] = useState<DemoMarketScenario>(() =>
     getActiveDemoScenario(),
   );
+  const [catalogueCache, setCatalogueCache] = useState<SharedQuoteCache | null>(null);
+  const [newlyUnlockedNotice, setNewlyUnlockedNotice] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [marketError, setMarketError] = useState<MarketServiceError | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(
     portfolio.isInitialized ? portfolio.lastUpdatedAt : null,
   );
-
-  useEffect(() => {
-    let mounted = true;
-    marketDataService
-      .getProviderStatus()
-      .then((info) => {
-        if (mounted) {
-          setProviderStatus(info);
-        }
-      })
-      .catch(() => {
-        // Fallback already in DEFAULT_PROVIDER_STATUS
-      });
-    return () => {
-      mounted = false;
-    };
-  }, []);
 
   const persistPortfolio = useCallback(
     (updater: (prev: DepotPortfolioState) => DepotPortfolioState) => {
@@ -143,11 +154,85 @@ export function DepotProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // Load shared catalogue quotes ONCE on mount (no per-position or per-render requests)
+  useEffect(() => {
+    let mounted = true;
+    setIsRefreshing(true);
+
+    Promise.all([
+      marketDataService.getProviderStatus(),
+      marketDataService.getCatalogueSnapshot({ forceRefresh: false }),
+    ])
+      .then(([statusInfo, sharedCatalogue]) => {
+        if (!mounted) return;
+        setProviderStatus(statusInfo);
+        setCatalogueCache(sharedCatalogue);
+        setLastRefreshedAt(sharedCatalogue.fetchedAt);
+      })
+      .catch(() => {
+        // Fallback already handled inside marketDataService
+      })
+      .finally(() => {
+        if (mounted) {
+          setIsRefreshing(false);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const syncUnlockedAssetsFromLessons = useCallback(
+    (completedLessons?: string[] | Record<string, boolean>) => {
+      const completed = completedLessons ?? loadProgress().completedLessons;
+      const computedUnlocked = getUnlockedAssetIds(completed);
+
+      setPortfolio((prev) => {
+        const currentSet = new Set(prev.unlockedAssets ?? getUnlockedAssetIds([]));
+        const newlyAdded = computedUnlocked.filter((id) => !currentSet.has(id));
+        if (newlyAdded.length === 0) {
+          return prev;
+        }
+        setNewlyUnlockedNotice(UNLOCK_NOTIFICATION_TEXT);
+        const merged = Array.from(new Set([...currentSet, ...computedUnlocked]));
+        const next: DepotPortfolioState = {
+          ...prev,
+          unlockedAssets: merged,
+        };
+        saveDepotState(next);
+        return next;
+      });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const handleCheckProgress = () => {
+      syncUnlockedAssetsFromLessons();
+    };
+    window.addEventListener('storage', handleCheckProgress);
+    window.addEventListener('focus', handleCheckProgress);
+    const interval = window.setInterval(handleCheckProgress, 1500);
+    return () => {
+      window.removeEventListener('storage', handleCheckProgress);
+      window.removeEventListener('focus', handleCheckProgress);
+      window.clearInterval(interval);
+    };
+  }, [syncUnlockedAssetsFromLessons]);
+
+  const dismissUnlockedNotice = useCallback(() => {
+    setNewlyUnlockedNotice(null);
+  }, []);
+
   const createPortfolio = useCallback(
-    (startingCashEur: number, portfolioName?: string) => {
+    (startingCashEur = DEFAULT_INITIAL_CAPITAL_EUR, portfolioName?: string) => {
+      const progress = loadProgress();
+      const unlockedAssets = getUnlockedAssetIds(progress.completedLessons);
       const created = initializeVirtualPortfolio({
         startingCashEur,
         portfolioName,
+        unlockedAssets,
       });
       saveDepotState(created);
       setPortfolio(created);
@@ -155,6 +240,16 @@ export function DepotProvider({ children }: { children: ReactNode }) {
       setMarketError(null);
     },
     [],
+  );
+
+  const isInstrumentUnlocked = useCallback(
+    (symbol: string): boolean => {
+      const meta = getDemoInstrumentMetadata(symbol);
+      if (!meta) return false;
+      const progress = loadProgress();
+      return isAssetUnlocked(meta, progress.completedLessons, portfolio.unlockedAssets);
+    },
+    [portfolio.unlockedAssets],
   );
 
   const buyInstrumentVirtually = useCallback(
@@ -166,6 +261,11 @@ export function DepotProvider({ children }: { children: ReactNode }) {
       fxTimestamp?: string;
     }): DepotTransaction => {
       let createdTx: DepotTransaction | null = null;
+      const progress = loadProgress();
+      const completedMap: Record<string, boolean> = {};
+      for (const id of progress.completedLessons) {
+        completedMap[id] = true;
+      }
       persistPortfolio((prev) => {
         const res = executeVirtualBuy({
           portfolio: prev,
@@ -174,6 +274,8 @@ export function DepotProvider({ children }: { children: ReactNode }) {
           input: params.input,
           fxRateToEur: params.fxRateToEur,
           fxTimestamp: params.fxTimestamp,
+          completedLessons: completedMap,
+          enforceUnlock: true,
         });
         createdTx = res.transaction;
         setLastRefreshedAt(res.portfolio.lastUpdatedAt);
@@ -226,38 +328,34 @@ export function DepotProvider({ children }: { children: ReactNode }) {
           const nextScen = setActiveDemoScenario(demoScenarioId, nowIso);
           setActiveScenario(nextScen);
           clearMarketClientCache();
-        } else if (providerStatus.mode === 'demo') {
-          // Keep demo prices stable at baseline on refresh; never randomly or automatically shift prices
-          const updatedScen = setActiveDemoScenario('baseline', nowIso);
-          setActiveScenario(updatedScen);
-          clearMarketClientCache();
         }
 
-        const heldSymbols = portfolio.positions.map((p) => p.symbol);
-        const quotesMap =
-          heldSymbols.length > 0
-            ? await marketDataService.getBatchQuotes(heldSymbols, {
-                forceRefresh: true,
-              })
-            : {};
+        const sharedCatalogue = await marketDataService.getCatalogueSnapshot({
+          forceRefresh: true,
+        });
+        setCatalogueCache(sharedCatalogue);
 
-        const hasUsdPosition = portfolio.positions.some(
-          (p) => p.currency === 'USD',
-        );
-        const usdFx = hasUsdPosition
-          ? await marketDataService.getExchangeRate('USD', 'EUR', {
-              forceRefresh: true,
-            })
-          : null;
+        const heldSymbols = portfolio.positions.map((p) => p.symbol.toUpperCase());
+        const heldQuotesMap: Record<string, MarketQuote> = {};
+        for (const sym of heldSymbols) {
+          const q = sharedCatalogue.quotes[sym];
+          if (q) {
+            heldQuotesMap[sym] = q;
+          }
+        }
+
+        const usdFx = await marketDataService.getExchangeRate('USD', 'EUR', {
+          forceRefresh: false,
+        });
 
         persistPortfolio((prev) => {
           const mergedQuotes = {
             ...prev.lastKnownQuotes,
-            ...quotesMap,
+            ...heldQuotesMap,
           };
           const mergedFx = {
             ...prev.lastKnownFxRates,
-            ...(usdFx ? { USD_EUR: usdFx } : {}),
+            USD_EUR: usdFx,
           };
 
           const draft: DepotPortfolioState = {
@@ -265,9 +363,9 @@ export function DepotProvider({ children }: { children: ReactNode }) {
             lastKnownQuotes: mergedQuotes,
             lastKnownFxRates: mergedFx,
             lastUpdatedAt: nowIso,
+            updatedAt: nowIso,
           };
 
-          // Only append a new chart snapshot on refresh if positions exist and quotes were updated
           if (prev.positions.length === 0) {
             return draft;
           }
@@ -277,7 +375,7 @@ export function DepotProvider({ children }: { children: ReactNode }) {
             snapshots: [...draft.snapshots, snap],
           };
         });
-        setLastRefreshedAt(nowIso);
+        setLastRefreshedAt(sharedCatalogue.fetchedAt ?? nowIso);
       } catch (err) {
         if (err instanceof MarketServiceException) {
           setMarketError({
@@ -296,27 +394,70 @@ export function DepotProvider({ children }: { children: ReactNode }) {
         setIsRefreshing(false);
       }
     },
-    [activeScenario.id, persistPortfolio, portfolio.positions, providerStatus.mode],
+    [persistPortfolio, portfolio.positions],
   );
 
   const resetDepot = useCallback(() => {
-    const fresh = resetDepotStorage();
+    resetDepotStorage();
     const baseline = setActiveDemoScenario('baseline');
     setActiveScenario(baseline);
-    clearMarketClientCache();
+    const progress = loadProgress();
+    const unlockedAssets = getUnlockedAssetIds(progress.completedLessons);
+    const fresh = initializeVirtualPortfolio({
+      startingCashEur: DEFAULT_INITIAL_CAPITAL_EUR,
+      portfolioName: 'Mein Übungsdepot',
+      unlockedAssets,
+    });
+    saveDepotState(fresh);
     setPortfolio(fresh);
     setMarketError(null);
-    setLastRefreshedAt(null);
+    setLastRefreshedAt(fresh.lastUpdatedAt);
   }, []);
 
   const clearMarketError = useCallback(() => {
     setMarketError(null);
   }, []);
 
-  const valuation = useMemo(
-    () => evaluatePortfolioValuation(portfolio),
-    [portfolio],
+  const catalogueQuotes = useMemo(
+    () => catalogueCache?.quotes ?? {},
+    [catalogueCache],
   );
+
+  const usdToEurRate = useMemo(
+    () => catalogueCache?.fxRateUsdToEur ?? 0.9215,
+    [catalogueCache],
+  );
+
+  const fxReferenceDate = useMemo(
+    () => catalogueCache?.fxReferenceDate ?? null,
+    [catalogueCache],
+  );
+
+  const unlockedAssets = useMemo(
+    () => portfolio.unlockedAssets ?? getUnlockedAssetIds([]),
+    [portfolio.unlockedAssets],
+  );
+
+  const valuation = useMemo(() => {
+    const isFallback = catalogueCache?.fxStatus === 'fallback';
+    const fxOverride = catalogueCache
+      ? {
+          USD_EUR: {
+            from: 'USD' as const,
+            to: 'EUR' as const,
+            rate: catalogueCache.fxRateUsdToEur,
+            date: catalogueCache.fxReferenceDate,
+            timestamp: catalogueCache.fetchedAt ?? new Date().toISOString(),
+            source: isFallback
+              ? DEMO_STATUS_LABEL
+              : 'Frankfurter EZB-Referenzkurs (USD/EUR)',
+            status: (isFallback ? 'fallback' : 'delayed') as 'fallback' | 'delayed',
+            isDemo: isFallback,
+          },
+        }
+      : undefined;
+    return evaluatePortfolioValuation(portfolio, catalogueQuotes, fxOverride);
+  }, [portfolio, catalogueQuotes, catalogueCache]);
 
   const weeklyReport = useMemo(
     () => generateDeterministicWeeklyReport(portfolio, valuation),
@@ -330,6 +471,12 @@ export function DepotProvider({ children }: { children: ReactNode }) {
       weeklyReport,
       providerStatus,
       activeScenario,
+      catalogueQuotes,
+      usdToEurRate,
+      fxReferenceDate,
+      unlockedAssets,
+      newlyUnlockedNotice,
+      isInstrumentUnlocked,
       isRefreshing,
       marketError,
       lastRefreshedAt,
@@ -337,6 +484,8 @@ export function DepotProvider({ children }: { children: ReactNode }) {
       buyInstrumentVirtually,
       sellInstrumentVirtually,
       refreshPortfolioQuotes,
+      syncUnlockedAssetsFromLessons,
+      dismissUnlockedNotice,
       resetDepot,
       clearMarketError,
     }),
@@ -346,6 +495,12 @@ export function DepotProvider({ children }: { children: ReactNode }) {
       weeklyReport,
       providerStatus,
       activeScenario,
+      catalogueQuotes,
+      usdToEurRate,
+      fxReferenceDate,
+      unlockedAssets,
+      newlyUnlockedNotice,
+      isInstrumentUnlocked,
       isRefreshing,
       marketError,
       lastRefreshedAt,
@@ -353,6 +508,8 @@ export function DepotProvider({ children }: { children: ReactNode }) {
       buyInstrumentVirtually,
       sellInstrumentVirtually,
       refreshPortfolioQuotes,
+      syncUnlockedAssetsFromLessons,
+      dismissUnlockedNotice,
       resetDepot,
       clearMarketError,
     ],

@@ -1,15 +1,19 @@
 import { formatEuro, formatPercent } from './calculator';
+import { getDemoInstrumentMetadata, isAssetUnlocked } from './market-demo-adapter';
 import type {
   ExchangeRateQuote,
   InstrumentAssetType,
   InstrumentMetadata,
   MarketDataStatus,
   MarketQuote,
+  NormalizedQuoteStatus,
   RiskCategory,
   SupportedCurrency,
 } from './market-types';
 
 export interface DepotPosition {
+  /** Normalized asset identifier (matches symbol in curated catalogue) */
+  assetId?: string;
   symbol: string;
   name: string;
   assetType: InstrumentAssetType;
@@ -23,14 +27,22 @@ export interface DepotPosition {
   averagePurchasePriceOriginal: number;
   /** Weighted average purchase price in EUR (portfolio base currency) */
   averagePurchasePriceEur: number;
+  /** Normalized alias for averagePurchasePriceEur */
+  averageBuyPriceEur?: number;
   /** Total invested cost basis of currently held shares in EUR */
   investedCostBasisEur: number;
+  /** Normalized alias for investedCostBasisEur */
+  investedAmountEur?: number;
   updatedAt: string;
 }
 
 export interface DepotTransaction {
   id: string;
   type: 'BUY' | 'SELL';
+  /** Normalized lowercase trade type ('buy' | 'sell') */
+  tradeType?: 'buy' | 'sell';
+  /** Normalized asset identifier */
+  assetId?: string;
   symbol: string;
   instrumentName: string;
   assetType: InstrumentAssetType;
@@ -39,11 +51,17 @@ export interface DepotTransaction {
   currency: SupportedCurrency;
   fxRateToEur: number;
   priceEur: number;
+  /** Normalized alias for immutable execution price in EUR */
+  executionPriceEur?: number;
   totalAmountEur: number;
+  /** Normalized alias for totalAmountEur */
+  totalEur?: number;
   /** For SELL transactions: realized gain/loss in EUR */
   realizedGainLossEur?: number;
   priceTimestamp: string;
-  dataStatus: MarketDataStatus;
+  /** Normalized timestamp when quote was fetched */
+  quoteFetchedAt?: string;
+  dataStatus: MarketDataStatus | NormalizedQuoteStatus;
   executedAt: string;
   isSimulated: true;
 }
@@ -56,27 +74,33 @@ export interface DepotSnapshot {
   totalValueEur: number;
   investedCostBasisEur: number;
   reason: 'creation' | 'buy' | 'sell' | 'refresh';
-  dataStatus: MarketDataStatus;
+  dataStatus: MarketDataStatus | NormalizedQuoteStatus;
 }
 
 export interface DepotPortfolioState {
-  version: 1;
+  version: 1 | 2;
   isInitialized: boolean;
   portfolioName: string;
   baseCurrency: 'EUR';
-  /** Virtual starting cash selected during onboarding (baseline for overall performance) */
+  /** Virtual starting cash (5,000.00 EUR default baseline for overall performance) */
   startingCashEur: number;
+  /** Normalized alias for startingCashEur (5,000.00 EUR) */
+  initialCapitalEur?: number;
   /** Available uninvested virtual cash in EUR */
   cashEur: number;
   /** Cumulative realized gain/loss from closed or partial sales in EUR */
   realizedGainLossTotalEur: number;
   positions: DepotPosition[];
   transactions: DepotTransaction[];
+  /** Unlocked asset IDs from completed lessons */
+  unlockedAssets?: string[];
   lastKnownQuotes: Record<string, MarketQuote>;
   lastKnownFxRates: Record<string, ExchangeRateQuote>;
   snapshots: DepotSnapshot[];
   createdAt: string;
   lastUpdatedAt: string;
+  /** Normalized alias for lastUpdatedAt */
+  updatedAt?: string;
 }
 
 export type TradeValidationErrorCode =
@@ -87,7 +111,8 @@ export type TradeValidationErrorCode =
   | 'INSUFFICIENT_CASH'
   | 'POSITION_NOT_FOUND'
   | 'OVERSELLING'
-  | 'FRACTIONAL_NOT_SUPPORTED';
+  | 'FRACTIONAL_NOT_SUPPORTED'
+  | 'ASSET_LOCKED';
 
 export interface VirtualBuyInput {
   mode: 'amount_eur' | 'quantity';
@@ -105,7 +130,8 @@ export interface VirtualBuyPreview {
   fxRateToEur: number;
   fxTimestamp: string;
   priceTimestamp: string;
-  dataStatus: MarketDataStatus;
+  quoteFetchedAt: string;
+  dataStatus: MarketDataStatus | NormalizedQuoteStatus;
   isDemo: boolean;
   quantity: number;
   estimatedOrderValueEur: number;
@@ -130,7 +156,8 @@ export interface VirtualSellPreview {
   currency: SupportedCurrency;
   fxRateToEur: number;
   priceTimestamp: string;
-  dataStatus: MarketDataStatus;
+  quoteFetchedAt: string;
+  dataStatus: MarketDataStatus | NormalizedQuoteStatus;
   isDemo: boolean;
   expectedProceedsEur: number;
   costBasisRemovedEur: number;
@@ -151,7 +178,8 @@ export interface ValuedPosition extends DepotPosition {
   /** Share of invested positions value (excluding cash) in % */
   weightOfInvestedPercent: number;
   priceTimestamp: string;
-  dataStatus: MarketDataStatus;
+  quoteFetchedAt: string;
+  dataStatus: MarketDataStatus | NormalizedQuoteStatus;
   isDemo: boolean;
   hasMissingPrice: boolean;
 }
@@ -176,6 +204,7 @@ export interface EducationalPortfolioInsight {
 export interface PortfolioValuationSummary {
   portfolioName: string;
   startingCashEur: number;
+  initialCapitalEur: number;
   cashEur: number;
   investedCostBasisEur: number;
   positionsMarketValueEur: number;
@@ -239,6 +268,64 @@ export function roundQuantity(value: number): number {
   return Math.round((value + Number.EPSILON) * 10000) / 10000;
 }
 
+/**
+ * Pure reusable portfolio calculation helpers (Phase 13)
+ */
+export function calculatePositionValueEur(quantity: number, currentPriceEur: number): number {
+  if (!Number.isFinite(quantity) || !Number.isFinite(currentPriceEur) || quantity <= 0 || currentPriceEur <= 0) {
+    return 0;
+  }
+  return roundCurrency(quantity * currentPriceEur);
+}
+
+export function calculateUnrealizedProfitLossEur(
+  positionValueEur: number,
+  investedAmountEur: number,
+): number {
+  return roundCurrency(positionValueEur - investedAmountEur);
+}
+
+export function calculateUnrealizedReturnPercent(
+  unrealizedProfitLossEur: number,
+  investedAmountEur: number,
+): number {
+  if (!Number.isFinite(investedAmountEur) || investedAmountEur <= 0) return 0;
+  return Math.round((unrealizedProfitLossEur / investedAmountEur) * 10000) / 100;
+}
+
+export function calculatePortfolioMarketValueEur(
+  positions: Array<{ quantity: number; currentPriceEur: number }>,
+): number {
+  return roundCurrency(
+    positions.reduce(
+      (sum, p) => sum + calculatePositionValueEur(p.quantity, p.currentPriceEur),
+      0,
+    ),
+  );
+}
+
+export function calculateTotalPortfolioValueEur(
+  cashEur: number,
+  portfolioMarketValueEur: number,
+): number {
+  return roundCurrency(cashEur + portfolioMarketValueEur);
+}
+
+export function calculateTotalPerformanceEur(
+  totalPortfolioValueEur: number,
+  initialCapitalEur = 5000,
+): {
+  totalPerformanceEur: number;
+  totalPerformancePercent: number;
+} {
+  const totalPerformanceEur = roundCurrency(totalPortfolioValueEur - initialCapitalEur);
+  const totalPerformancePercent =
+    initialCapitalEur > 0
+      ? Math.round((totalPerformanceEur / initialCapitalEur) * 10000) / 100
+      : 0;
+  return { totalPerformanceEur, totalPerformancePercent };
+}
+
 export function formatOriginalCurrency(
   amount: number,
   currency: SupportedCurrency,
@@ -269,6 +356,33 @@ export function formatSignedPercent(value: number, fractionDigits = 2): string {
   return `±${formatted}`;
 }
 
+function resolveQuotePriceEur(
+  quote: MarketQuote,
+  currency: SupportedCurrency,
+  fxRateToEur?: number,
+): { priceEur: number; fxRate: number } {
+  if (currency === 'EUR') {
+    return {
+      priceEur: roundCurrency(quote.priceEur && quote.priceEur > 0 ? quote.priceEur : quote.price),
+      fxRate: 1,
+    };
+  }
+  if (fxRateToEur !== undefined && Number.isFinite(fxRateToEur) && fxRateToEur > 0) {
+    return {
+      priceEur: roundCurrency(quote.price * fxRateToEur),
+      fxRate: fxRateToEur,
+    };
+  }
+  if (quote.priceEur && Number.isFinite(quote.priceEur) && quote.priceEur > 0 && quote.price > 0) {
+    const inferredRate = roundQuantity(quote.priceEur / quote.price);
+    return {
+      priceEur: roundCurrency(quote.priceEur),
+      fxRate: inferredRate > 0 ? inferredRate : 1,
+    };
+  }
+  return { priceEur: 0, fxRate: fxRateToEur ?? 0 };
+}
+
 export function previewVirtualBuy(params: {
   portfolio: DepotPortfolioState;
   instrument: InstrumentMetadata;
@@ -276,15 +390,19 @@ export function previewVirtualBuy(params: {
   input: VirtualBuyInput;
   fxRateToEur?: number;
   fxTimestamp?: string;
+  completedLessons?: Record<string, boolean>;
+  enforceUnlock?: boolean;
 }): VirtualBuyPreview {
   const { portfolio, instrument, quote, input } = params;
-  const fxRate =
-    instrument.currency === 'EUR' ? 1 : (params.fxRateToEur ?? 0);
-  const fxTimestamp = params.fxTimestamp ?? quote?.timestamp ?? new Date().toISOString();
+  const fxTimestamp =
+    params.fxTimestamp ?? quote?.fetchedAt ?? quote?.timestamp ?? new Date().toISOString();
+  const priceTimestamp = quote?.marketTime || quote?.timestamp || '';
+  const quoteFetchedAt = quote?.fetchedAt || quote?.timestamp || '';
 
   const buildInvalid = (
     errorCode: TradeValidationErrorCode,
     errorMessage: string,
+    fxRateVal = 1,
   ): VirtualBuyPreview => ({
     valid: false,
     errorCode,
@@ -293,9 +411,10 @@ export function previewVirtualBuy(params: {
     marketPriceOriginal: quote?.price ?? 0,
     marketPriceEur: 0,
     currency: instrument.currency,
-    fxRateToEur: fxRate,
+    fxRateToEur: fxRateVal,
     fxTimestamp,
-    priceTimestamp: quote?.timestamp ?? '',
+    priceTimestamp,
+    quoteFetchedAt,
     dataStatus: quote?.status ?? 'unavailable',
     isDemo: quote?.isDemo ?? true,
     quantity: 0,
@@ -308,25 +427,59 @@ export function previewVirtualBuy(params: {
     educationalRiskNote: '',
   });
 
-  if (!quote || !Number.isFinite(quote.price) || quote.price <= 0 || quote.status === 'unavailable') {
+  // Check lesson-based unlocking if enforceUnlock is true or unlockedAssets is explicitly provided
+  const curatedMeta = getDemoInstrumentMetadata(instrument.symbol);
+  const shouldCheckUnlock =
+    params.enforceUnlock === true ||
+    params.completedLessons !== undefined ||
+    (Array.isArray(portfolio.unlockedAssets) && portfolio.unlockedAssets.length > 0);
+
+  if (shouldCheckUnlock && curatedMeta) {
+    const unlocked = isAssetUnlocked(
+      curatedMeta,
+      params.completedLessons,
+      portfolio.unlockedAssets,
+    );
+    if (!unlocked) {
+      return buildInvalid(
+        'ASSET_LOCKED',
+        `Dieses Wertpapier ist noch gesperrt (${curatedMeta.unlockRequirementText ?? 'Lektion abschließen'}). Schließe zuerst die zugehörige Lektion ab.`,
+      );
+    }
+  }
+
+  if (
+    !quote ||
+    !Number.isFinite(quote.price) ||
+    quote.price <= 0 ||
+    quote.status === 'unavailable' ||
+    !priceTimestamp
+  ) {
     return buildInvalid(
       'MISSING_PRICE',
       'Für dieses Wertpapier liegt aktuell kein gültiger Marktpreis vor. Ohne verlässlichen Referenzkurs ist kein virtueller Kauf möglich.',
     );
   }
 
+  const { priceEur, fxRate } = resolveQuotePriceEur(
+    quote,
+    instrument.currency,
+    params.fxRateToEur,
+  );
+
   if (!Number.isFinite(fxRate) || fxRate <= 0) {
     return buildInvalid(
       'INVALID_FX_RATE',
       `Für die Währungsumrechnung (${instrument.currency} → EUR) liegt kein gültiger Wechselkurs vor.`,
+      fxRate,
     );
   }
 
-  const priceEur = roundCurrency(quote.price * fxRate);
   if (priceEur <= 0) {
     return buildInvalid(
       'MISSING_PRICE',
       'Der umgerechnete Referenzpreis in Euro ist ungültig.',
+      fxRate,
     );
   }
 
@@ -336,6 +489,7 @@ export function previewVirtualBuy(params: {
       input.mode === 'amount_eur'
         ? 'Bitte gib einen positiven Anlagebetrag in Euro ein (z. B. 250 €).'
         : 'Bitte gib eine positive Stückzahl größer als 0 ein.',
+      fxRate,
     );
   }
 
@@ -350,6 +504,7 @@ export function previewVirtualBuy(params: {
         return buildInvalid(
           'FRACTIONAL_NOT_SUPPORTED',
           `Dieses Wertpapier unterstützt keine Bruchstücke. Für mindestens 1 ganzes Stück werden ${formatEuro(priceEur, 2)} benötigt.`,
+          fxRate,
         );
       }
       quantity = wholeShares;
@@ -362,6 +517,7 @@ export function previewVirtualBuy(params: {
       return buildInvalid(
         'FRACTIONAL_NOT_SUPPORTED',
         'Dieses Wertpapier unterstützt nur ganze Stückzahlen (keine Bruchstücke).',
+        fxRate,
       );
     }
     quantity = roundQuantity(input.value);
@@ -372,6 +528,7 @@ export function previewVirtualBuy(params: {
     return buildInvalid(
       'INVALID_QUANTITY',
       'Der eingegebene Betrag ist zu klein für eine darstellbare Stückzahl (mindestens 0,0001 Stück bzw. 1,00 €).',
+      fxRate,
     );
   }
 
@@ -379,6 +536,7 @@ export function previewVirtualBuy(params: {
     return buildInvalid(
       'INSUFFICIENT_CASH',
       `Nicht genügend virtuelles Bargeld verfügbar. Der Auftragswert beträgt ${formatEuro(estimatedOrderValueEur, 2)}, verfügbar sind ${formatEuro(portfolio.cashEur, 2)}.`,
+      fxRate,
     );
   }
 
@@ -400,7 +558,6 @@ export function previewVirtualBuy(params: {
     (oldQty * oldAvgOrig + quantity * quote.price) / resultingPositionQuantity,
   );
 
-  // Estimate total portfolio value to compute resulting weight
   const currentValuation = evaluatePortfolioValuation(portfolio);
   const totalPortfolioVal = Math.max(
     1,
@@ -437,7 +594,8 @@ export function previewVirtualBuy(params: {
     currency: instrument.currency,
     fxRateToEur: fxRate,
     fxTimestamp,
-    priceTimestamp: quote.timestamp,
+    priceTimestamp,
+    quoteFetchedAt,
     dataStatus: quote.status,
     isDemo: quote.isDemo,
     quantity,
@@ -459,6 +617,8 @@ export function executeVirtualBuy(params: {
   fxRateToEur?: number;
   fxTimestamp?: string;
   executedAt?: string;
+  completedLessons?: Record<string, boolean>;
+  enforceUnlock?: boolean;
 }): {
   portfolio: DepotPortfolioState;
   transaction: DepotTransaction;
@@ -479,6 +639,7 @@ export function executeVirtualBuy(params: {
   const nextPositions = [...portfolio.positions];
   if (existingIndex === -1) {
     nextPositions.push({
+      assetId: instrument.symbol,
       symbol: instrument.symbol,
       name: instrument.name,
       assetType: instrument.assetType,
@@ -490,7 +651,9 @@ export function executeVirtualBuy(params: {
       quantity: preview.resultingPositionQuantity,
       averagePurchasePriceOriginal: preview.resultingWeightedAvgPriceOriginal,
       averagePurchasePriceEur: preview.resultingWeightedAvgPriceEur,
+      averageBuyPriceEur: preview.resultingWeightedAvgPriceEur,
       investedCostBasisEur: preview.estimatedOrderValueEur,
+      investedAmountEur: preview.estimatedOrderValueEur,
       updatedAt: nowIso,
     });
   } else {
@@ -500,10 +663,13 @@ export function executeVirtualBuy(params: {
     );
     nextPositions[existingIndex] = {
       ...existing,
+      assetId: existing.assetId ?? existing.symbol,
       quantity: preview.resultingPositionQuantity,
       averagePurchasePriceOriginal: preview.resultingWeightedAvgPriceOriginal,
       averagePurchasePriceEur: preview.resultingWeightedAvgPriceEur,
+      averageBuyPriceEur: preview.resultingWeightedAvgPriceEur,
       investedCostBasisEur: newInvestedCostBasisEur,
+      investedAmountEur: newInvestedCostBasisEur,
       updatedAt: nowIso,
     };
   }
@@ -511,6 +677,8 @@ export function executeVirtualBuy(params: {
   const transaction: DepotTransaction = {
     id: `tx-buy-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     type: 'BUY',
+    tradeType: 'buy',
+    assetId: instrument.symbol,
     symbol: instrument.symbol,
     instrumentName: instrument.name,
     assetType: instrument.assetType,
@@ -519,8 +687,11 @@ export function executeVirtualBuy(params: {
     currency: instrument.currency,
     fxRateToEur: preview.fxRateToEur,
     priceEur: preview.marketPriceEur,
+    executionPriceEur: preview.marketPriceEur,
     totalAmountEur: preview.estimatedOrderValueEur,
+    totalEur: preview.estimatedOrderValueEur,
     priceTimestamp: preview.priceTimestamp,
+    quoteFetchedAt: preview.quoteFetchedAt,
     dataStatus: preview.dataStatus,
     executedAt: nowIso,
     isSimulated: true,
@@ -540,8 +711,8 @@ export function executeVirtualBuy(params: {
       timestamp: preview.fxTimestamp,
       source: quote.isDemo
         ? 'EZB-Referenzkurs-Simulation (Beispieldaten)'
-        : 'Server-Wechselkurs',
-      status: quote.status,
+        : 'Frankfurter / EZB-Referenzkurs',
+      status: quote.legacyStatus ?? 'delayed',
       isDemo: quote.isDemo,
     };
   }
@@ -554,6 +725,7 @@ export function executeVirtualBuy(params: {
     lastKnownQuotes: nextQuotes,
     lastKnownFxRates: nextFxRates,
     lastUpdatedAt: nowIso,
+    updatedAt: nowIso,
   };
 
   const snapshot = buildPortfolioSnapshot(draftPortfolio, 'buy', nowIso);
@@ -580,6 +752,7 @@ export function previewVirtualSell(params: {
   );
 
   const dummyPosition: DepotPosition = position ?? {
+    assetId: symbol,
     symbol,
     name: symbol,
     assetType: 'Aktie',
@@ -591,16 +764,19 @@ export function previewVirtualSell(params: {
     quantity: 0,
     averagePurchasePriceOriginal: 0,
     averagePurchasePriceEur: 0,
+    averageBuyPriceEur: 0,
     investedCostBasisEur: 0,
+    investedAmountEur: 0,
     updatedAt: '',
   };
 
-  const fxRate =
-    dummyPosition.currency === 'EUR' ? 1 : (params.fxRateToEur ?? 0);
+  const priceTimestamp = quote?.marketTime || quote?.timestamp || '';
+  const quoteFetchedAt = quote?.fetchedAt || quote?.timestamp || '';
 
   const buildInvalid = (
     errorCode: TradeValidationErrorCode,
     errorMessage: string,
+    fxRateVal = 1,
   ): VirtualSellPreview => ({
     valid: false,
     errorCode,
@@ -612,8 +788,9 @@ export function previewVirtualSell(params: {
     referenceMarketPriceOriginal: quote?.price ?? 0,
     referenceMarketPriceEur: 0,
     currency: dummyPosition.currency,
-    fxRateToEur: fxRate,
-    priceTimestamp: quote?.timestamp ?? '',
+    fxRateToEur: fxRateVal,
+    priceTimestamp,
+    quoteFetchedAt,
     dataStatus: quote?.status ?? 'unavailable',
     isDemo: quote?.isDemo ?? true,
     expectedProceedsEur: 0,
@@ -630,17 +807,30 @@ export function previewVirtualSell(params: {
     );
   }
 
-  if (!quote || !Number.isFinite(quote.price) || quote.price <= 0 || quote.status === 'unavailable') {
+  if (
+    !quote ||
+    !Number.isFinite(quote.price) ||
+    quote.price <= 0 ||
+    quote.status === 'unavailable' ||
+    !priceTimestamp
+  ) {
     return buildInvalid(
       'MISSING_PRICE',
       'Für dieses Wertpapier liegt aktuell kein gültiger Marktpreis vor. Ohne Referenzkurs kann kein Verkauf simuliert werden.',
     );
   }
 
+  const { priceEur, fxRate } = resolveQuotePriceEur(
+    quote,
+    dummyPosition.currency,
+    params.fxRateToEur,
+  );
+
   if (!Number.isFinite(fxRate) || fxRate <= 0) {
     return buildInvalid(
       'INVALID_FX_RATE',
       'Für die Währungsumrechnung liegt kein gültiger Wechselkurs vor.',
+      fxRate,
     );
   }
 
@@ -649,6 +839,7 @@ export function previewVirtualSell(params: {
     return buildInvalid(
       'INVALID_QUANTITY',
       'Bitte gib eine positive Verkaufs-Stückzahl größer als 0 ein.',
+      fxRate,
     );
   }
 
@@ -656,10 +847,10 @@ export function previewVirtualSell(params: {
     return buildInvalid(
       'OVERSELLING',
       `Du kannst nicht mehr Anteile verkaufen, als du besitzt (Leerverkäufe sind ausgeschlossen). Aktueller Bestand: ${position.quantity.toLocaleString('de-DE')} Stück.`,
+      fxRate,
     );
   }
 
-  const priceEur = roundCurrency(quote.price * fxRate);
   const expectedProceedsEur = roundCurrency(safeSellQty * priceEur);
 
   const isFullSale = safeSellQty === position.quantity;
@@ -690,7 +881,8 @@ export function previewVirtualSell(params: {
     referenceMarketPriceEur: priceEur,
     currency: position.currency,
     fxRateToEur: fxRate,
-    priceTimestamp: quote.timestamp,
+    priceTimestamp,
+    quoteFetchedAt,
     dataStatus: quote.status,
     isDemo: quote.isDemo,
     expectedProceedsEur,
@@ -734,8 +926,11 @@ export function executeVirtualSell(params: {
       );
       nextPositions.push({
         ...item,
+        assetId: item.assetId ?? item.symbol,
         quantity: preview.remainingQuantity,
+        averageBuyPriceEur: item.averagePurchasePriceEur,
         investedCostBasisEur: remainingCostBasisEur,
+        investedAmountEur: remainingCostBasisEur,
         updatedAt: nowIso,
       });
     }
@@ -744,6 +939,8 @@ export function executeVirtualSell(params: {
   const transaction: DepotTransaction = {
     id: `tx-sell-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     type: 'SELL',
+    tradeType: 'sell',
+    assetId: pos.symbol,
     symbol: pos.symbol,
     instrumentName: pos.name,
     assetType: pos.assetType,
@@ -752,9 +949,12 @@ export function executeVirtualSell(params: {
     currency: pos.currency,
     fxRateToEur: preview.fxRateToEur,
     priceEur: preview.referenceMarketPriceEur,
+    executionPriceEur: preview.referenceMarketPriceEur,
     totalAmountEur: preview.expectedProceedsEur,
+    totalEur: preview.expectedProceedsEur,
     realizedGainLossEur: preview.realizedGainLossEur,
     priceTimestamp: preview.priceTimestamp,
+    quoteFetchedAt: preview.quoteFetchedAt,
     dataStatus: preview.dataStatus,
     executedAt: nowIso,
     isSimulated: true,
@@ -775,6 +975,7 @@ export function executeVirtualSell(params: {
     transactions: [transaction, ...portfolio.transactions],
     lastKnownQuotes: nextQuotes,
     lastUpdatedAt: nowIso,
+    updatedAt: nowIso,
   };
 
   const snapshot = buildPortfolioSnapshot(draftPortfolio, 'sell', nowIso);
@@ -795,12 +996,12 @@ export function buildPortfolioSnapshot(
 ): DepotSnapshot {
   const valuation = evaluatePortfolioValuation(portfolio);
   const statuses = valuation.valuedPositions.map((p) => p.dataStatus);
-  const dataStatus: MarketDataStatus =
+  const dataStatus: MarketDataStatus | NormalizedQuoteStatus =
     statuses.length === 0
-      ? 'demo'
-      : statuses.includes('demo')
-        ? 'demo'
-        : statuses[0] ?? 'delayed';
+      ? 'live'
+      : statuses.includes('fallback') || statuses.includes('demo')
+        ? 'fallback'
+        : statuses[0] ?? 'live';
 
   return {
     id: `snap-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -845,27 +1046,33 @@ export function evaluatePortfolioValuation(
         ? 1
         : fxObj && Number.isFinite(fxObj.rate) && fxObj.rate > 0
           ? fxObj.rate
-          : pos.averagePurchasePriceOriginal > 0
-            ? roundQuantity(pos.averagePurchasePriceEur / pos.averagePurchasePriceOriginal)
-            : 1;
+          : hasValidQuote && quote!.priceEur && quote!.priceEur > 0
+            ? roundQuantity(quote!.priceEur / quote!.price)
+            : pos.averagePurchasePriceOriginal > 0
+              ? roundQuantity(pos.averagePurchasePriceEur / pos.averagePurchasePriceOriginal)
+              : 1;
 
     const currentPriceOriginal = hasValidQuote
       ? quote!.price
       : pos.averagePurchasePriceOriginal;
 
     const currentPriceEur = hasValidQuote
-      ? roundCurrency(currentPriceOriginal * currentFxRateToEur)
+      ? fxObj && Number.isFinite(fxObj.rate) && fxObj.rate > 0
+        ? roundCurrency(currentPriceOriginal * currentFxRateToEur)
+        : quote!.priceEur && quote!.priceEur > 0
+          ? roundCurrency(quote!.priceEur)
+          : roundCurrency(currentPriceOriginal * currentFxRateToEur)
       : pos.averagePurchasePriceEur;
 
-    const currentValueEur = roundCurrency(pos.quantity * currentPriceEur);
-    const unrealizedGainLossEur = roundCurrency(
-      currentValueEur - pos.investedCostBasisEur,
+    const currentValueEur = calculatePositionValueEur(pos.quantity, currentPriceEur);
+    const unrealizedGainLossEur = calculateUnrealizedProfitLossEur(
+      currentValueEur,
+      pos.investedCostBasisEur,
     );
-    const unrealizedGainLossPercent =
-      pos.investedCostBasisEur > 0
-        ? Math.round((unrealizedGainLossEur / pos.investedCostBasisEur) * 10000) /
-          100
-        : 0;
+    const unrealizedGainLossPercent = calculateUnrealizedReturnPercent(
+      unrealizedGainLossEur,
+      pos.investedCostBasisEur,
+    );
 
     investedCostBasisEur = roundCurrency(
       investedCostBasisEur + pos.investedCostBasisEur,
@@ -876,42 +1083,46 @@ export function evaluatePortfolioValuation(
 
     return {
       ...pos,
+      assetId: pos.assetId ?? pos.symbol,
+      averageBuyPriceEur: pos.averagePurchasePriceEur,
+      investedAmountEur: pos.investedCostBasisEur,
       currentPriceOriginal,
       currentPriceEur,
       currentFxRateToEur,
       currentValueEur,
       unrealizedGainLossEur,
       unrealizedGainLossPercent,
-      priceTimestamp: quote?.timestamp ?? pos.updatedAt,
-      dataStatus: hasValidQuote ? quote!.status : ('unavailable' as MarketDataStatus),
+      priceTimestamp: quote?.marketTime ?? quote?.timestamp ?? pos.updatedAt,
+      quoteFetchedAt: quote?.fetchedAt ?? quote?.timestamp ?? pos.updatedAt,
+      dataStatus: hasValidQuote
+        ? quote!.status
+        : ('unavailable' as MarketDataStatus),
       isDemo: quote ? quote.isDemo : true,
       hasMissingPrice: !hasValidQuote,
     };
   });
 
   const cashEur = roundCurrency(portfolio.cashEur);
-  const totalPortfolioValueEur = roundCurrency(
-    cashEur + positionsMarketValueEur,
+  const totalPortfolioValueEur = calculateTotalPortfolioValueEur(
+    cashEur,
+    positionsMarketValueEur,
   );
-  const unrealizedGainLossEur = roundCurrency(
-    positionsMarketValueEur - investedCostBasisEur,
+  const unrealizedGainLossEur = calculateUnrealizedProfitLossEur(
+    positionsMarketValueEur,
+    investedCostBasisEur,
   );
-  const unrealizedGainLossPercent =
-    investedCostBasisEur > 0
-      ? Math.round((unrealizedGainLossEur / investedCostBasisEur) * 10000) / 100
-      : 0;
+  const unrealizedGainLossPercent = calculateUnrealizedReturnPercent(
+    unrealizedGainLossEur,
+    investedCostBasisEur,
+  );
 
   const realizedGainLossEur = roundCurrency(portfolio.realizedGainLossTotalEur);
-  const startingCashEur = roundCurrency(portfolio.startingCashEur);
-
-  // Baseline definition: totalPortfolioValueEur vs startingCashEur
-  const totalGainLossEur = roundCurrency(
-    totalPortfolioValueEur - startingCashEur,
+  const startingCashEur = roundCurrency(
+    portfolio.initialCapitalEur ?? portfolio.startingCashEur ?? 5000,
   );
-  const totalPerformancePercent =
-    startingCashEur > 0
-      ? Math.round((totalGainLossEur / startingCashEur) * 10000) / 100
-      : 0;
+
+  const { totalPerformanceEur: totalGainLossEur, totalPerformancePercent } =
+    calculateTotalPerformanceEur(totalPortfolioValueEur, startingCashEur);
 
   const valuedPositions: ValuedPosition[] = tempPositions
     .map((p) => ({
@@ -942,7 +1153,6 @@ export function evaluatePortfolioValuation(
     : 0;
   const largestPositionName = largestPos ? largestPos.name : null;
 
-  // Build Asset Class Allocation (including Cash)
   const assetGroups = new Map<string, number>();
   for (const pos of valuedPositions) {
     assetGroups.set(
@@ -976,14 +1186,13 @@ export function evaluatePortfolioValuation(
   if (cashEur > 0) {
     assetAllocation.push({
       key: 'CASH',
-      label: 'Verfügbares Übungsgeld (Cash)',
+      label: 'Verfügbares Spielgeld (Cash)',
       valueEur: cashEur,
       shareOfPortfolioPercent: cashSharePercent,
       shareOfInvestedPercent: 0,
     });
   }
 
-  // Build Sector Allocation (for invested positions)
   const sectorGroups = new Map<string, number>();
   for (const pos of valuedPositions) {
     sectorGroups.set(
@@ -1019,6 +1228,7 @@ export function evaluatePortfolioValuation(
   return {
     portfolioName: portfolio.portfolioName,
     startingCashEur,
+    initialCapitalEur: startingCashEur,
     cashEur,
     investedCostBasisEur,
     positionsMarketValueEur,
@@ -1055,9 +1265,9 @@ function buildDynamicEducationalInsights(params: {
     insights.push({
       id: 'empty-portfolio',
       tone: 'info',
-      title: 'Dein Übungsdepot liegt noch zu 100 % in virtuellem Bargeld.',
+      title: 'Dein Übungsdepot liegt noch zu 100 % in virtuellem Spielgeld.',
       explanation:
-        'Starte mit einem ersten virtuellen Kauf – vergleiche zum Beispiel einen breit gestreuten Welt-ETF mit einer einzelnen Aktie, um deren unterschiedliche Schwankungen zu beobachten.',
+        'Starte mit einem ersten virtuellen Kauf – zum Beispiel mit dem direkt freigeschalteten MSCI World ETF –, um Wertentwicklung und Schwankungen zu beobachten.',
       relatedLessonRoute: '/anlageklassen',
       relatedLessonLabel: 'Lektion „Anlageklassen“ öffnen',
     });
@@ -1068,7 +1278,6 @@ function buildDynamicEducationalInsights(params: {
   const singleStocks = valuedPositions.filter((p) => p.assetType === 'Aktie');
   const etfs = valuedPositions.filter((p) => p.assetType === 'ETF');
 
-  // 1. Single stock concentration warning
   const largestSingleStock = singleStocks[0];
   if (largestSingleStock && largestSingleStock.weightOfPortfolioPercent >= 25) {
     insights.push({
@@ -1094,7 +1303,6 @@ function buildDynamicEducationalInsights(params: {
     });
   }
 
-  // 2. Sector concentration / thematic overlap
   const topNonBroadSector = sectorAllocation.find(
     (s) => !s.key.includes('Breit gestreut'),
   );
@@ -1112,7 +1320,6 @@ function buildDynamicEducationalInsights(params: {
     });
   }
 
-  // 3. Portfolio decline reassurance
   if (totalGainLossEur < 0) {
     insights.push({
       id: 'negative-fluctuation',
@@ -1125,7 +1332,6 @@ function buildDynamicEducationalInsights(params: {
     });
   }
 
-  // 4. ETF + Single Stock direct comparison insight
   if (etfs.length > 0 && singleStocks.length > 0) {
     insights.push({
       id: 'etf-vs-stock-active',
@@ -1138,14 +1344,13 @@ function buildDynamicEducationalInsights(params: {
     });
   }
 
-  // 5. Fallback general insight
   if (insights.length === 0) {
     insights.push({
       id: 'balanced-overview',
       tone: 'info',
       title:
         cashSharePercent > 60
-          ? `Du hältst aktuell noch ${formatPercent(cashSharePercent, 1)} als virtuelle Barreserve.`
+          ? `Du hältst aktuell noch ${formatPercent(cashSharePercent, 1)} als verfügbares Spielgeld.`
           : `Dein größter Baustein ist aktuell ${largest.name} (${formatPercent(largest.weightOfPortfolioPercent, 1)} des Depots).`,
       explanation:
         'Nutze das Übungsdepot, um risikofrei zu testen, wie sich Nachkäufe auf den durchschnittlichen Kaufpreis und die Gewichtung deiner Positionen auswirken.',

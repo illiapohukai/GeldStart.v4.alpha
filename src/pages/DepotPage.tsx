@@ -8,8 +8,11 @@ import {
   ChevronUp,
   FileText,
   Info,
+  Lock,
   Plus,
   RefreshCw,
+  Sparkles,
+  Unlock,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { AssetDetailView } from '@/components/depot/AssetDetailView';
@@ -30,12 +33,19 @@ import {
 } from '@/lib/depot-calculations';
 import { useDepot } from '@/lib/depot-context';
 import {
+  DEMO_INSTRUMENTS,
   getDemoInstrumentMetadata,
   getDemoQuote,
+  UNLOCK_NOTIFICATION_TEXT,
 } from '@/lib/market-demo-adapter';
 import {
+  FALLBACK_QUOTE_NOTICE,
+  formatGermanDateLabel,
   formatMarketDataStatusBadge,
+  formatStaleQuoteNotice,
+  MARKET_DATA_SIMULATION_NOTICE,
   marketDataService,
+  VIRTUAL_DEPOT_NOTICE,
 } from '@/lib/market-service';
 import type {
   InstrumentMetadata,
@@ -117,6 +127,11 @@ export function DepotPage() {
     valuation,
     weeklyReport,
     providerStatus,
+    catalogueQuotes,
+    unlockedAssets,
+    newlyUnlockedNotice,
+    isInstrumentUnlocked,
+    dismissUnlockedNotice,
     isRefreshing,
     marketError,
     lastRefreshedAt,
@@ -135,7 +150,8 @@ export function DepotPage() {
   const [selectedEduScenarioId, setSelectedEduScenarioId] = useState<
     EducationalScenarioComparison['id']
   >('calm');
-  const [showTransactions, setShowTransactions] = useState(false);
+  const [showTransactions, setShowTransactions] = useState(true);
+  const [showCatalogueUnlocks, setShowCatalogueUnlocks] = useState(false);
 
   // Support URL query parameter ?symbol=EUNL.DE from Learning modules
   useEffect(() => {
@@ -144,28 +160,41 @@ export function DepotPage() {
     const symbolParam = params.get('symbol');
     if (symbolParam) {
       const meta = getDemoInstrumentMetadata(symbolParam);
-      const q = getDemoQuote(symbolParam);
+      const q =
+        catalogueQuotes[symbolParam.toUpperCase()] ??
+        portfolio.lastKnownQuotes[symbolParam.toUpperCase()] ??
+        getDemoQuote(symbolParam);
       if (meta) {
         setSubView({ type: 'asset_detail', instrument: meta, quote: q });
       }
     }
-  }, [portfolio.isInitialized]);
+  }, [portfolio.isInitialized, catalogueQuotes, portfolio.lastKnownQuotes]);
 
   if (!portfolio.isInitialized) {
     return <DepotOnboarding />;
   }
 
+  const resolveInstrumentQuote = (symbol: string): MarketQuote | null => {
+    const upper = symbol.trim().toUpperCase();
+    return (
+      catalogueQuotes[upper] ??
+      portfolio.lastKnownQuotes[upper] ??
+      getDemoQuote(upper)
+    );
+  };
+
   const handleOpenPositionDetail = async (symbol: string) => {
     const meta = await marketDataService.getInstrumentDetails(symbol);
     if (!meta) return;
-    const q =
-      portfolio.lastKnownQuotes[symbol.toUpperCase()] ??
-      getDemoQuote(symbol);
+    const q = resolveInstrumentQuote(symbol);
     setSubView({ type: 'asset_detail', instrument: meta, quote: q });
   };
 
   const handleOpenBuyForSymbol = async (symbol: string) => {
     const meta = await marketDataService.getInstrumentDetails(symbol);
+    if (meta && !isInstrumentUnlocked(meta.symbol)) {
+      return;
+    }
     setSubView({ type: 'buy', instrument: meta });
   };
 
@@ -180,9 +209,7 @@ export function DepotPage() {
       <AssetDetailView
         instrument={subView.instrument}
         quote={
-          portfolio.lastKnownQuotes[subView.instrument.symbol.toUpperCase()] ??
-          subView.quote ??
-          getDemoQuote(subView.instrument.symbol)
+          resolveInstrumentQuote(subView.instrument.symbol) ?? subView.quote
         }
         holding={holding}
         onBack={() => setSubView({ type: 'overview' })}
@@ -244,14 +271,42 @@ export function DepotPage() {
     hypotheticalTotalEur - valuation.totalPortfolioValueEur,
   );
 
+  // Determine overall catalogue quote status for transparent notices
+  const allCatalogueQuotesList = Object.values(catalogueQuotes).filter(
+    (q) => q.symbol !== 'EUR-CASH',
+  );
+  const hasStaleQuotes =
+    valuation.valuedPositions.some((p) => p.dataStatus === 'stale') ||
+    allCatalogueQuotesList.some((q) => q.status === 'stale');
+  const hasFallbackQuotes =
+    valuation.valuedPositions.some(
+      (p) => p.dataStatus === 'fallback' || p.dataStatus === 'demo' || p.isDemo,
+    ) ||
+    (allCatalogueQuotesList.length > 0 &&
+      allCatalogueQuotesList.every((q) => q.status === 'fallback' || q.isDemo));
+
+  const sampleTimestamp =
+    valuation.valuedPositions[0]?.priceTimestamp ??
+    allCatalogueQuotesList[0]?.marketTime ??
+    lastRefreshedAt ??
+    portfolio.lastUpdatedAt;
+  const priceDateFormatted = formatGermanDateLabel(sampleTimestamp);
+
+  const unlockedTradableCount = DEMO_INSTRUMENTS.filter((inst) =>
+    isInstrumentUnlocked(inst.symbol),
+  ).length;
+
   return (
     <div className="space-y-4 sm:space-y-5">
-      {/* A. COMPACT STATUS HEADER */}
+      {/* A. COMPACT STATUS HEADER & VISIBLE EDUCATIONAL NOTICE */}
       <header className="space-y-2">
         <div className="flex items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2 min-w-0">
-            <span className="text-xs font-bold uppercase tracking-wider text-[var(--depot-text-primary)]">
-              Übungsdepot
+            <span
+              data-testid="depot-virtual-notice"
+              className="text-xs font-bold uppercase tracking-wider text-[var(--depot-accent-lime)]"
+            >
+              {VIRTUAL_DEPOT_NOTICE}
             </span>
             <button
               type="button"
@@ -260,9 +315,9 @@ export function DepotPage() {
               className="inline-flex min-h-[32px] items-center gap-1.5 rounded-lg border border-[var(--depot-border)] bg-[var(--depot-bg-secondary)] px-2.5 py-1 text-[11px] font-medium text-[var(--depot-text-secondary)] hover:text-[var(--depot-text-primary)] transition-colors"
             >
               <span data-testid="depot-data-status-label">
-                Simulation ·{' '}
-                {providerStatus.mode === 'demo'
-                  ? 'Beispieldaten – keine aktuellen Marktdaten'
+                Kursdatum: {priceDateFormatted} ·{' '}
+                {hasFallbackQuotes
+                  ? 'Demowerte (Ausgangsversion)'
                   : providerStatus.statusLabel}
               </span>
               <Info
@@ -273,15 +328,6 @@ export function DepotPage() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {lastRefreshedAt && (
-              <span className="text-[11px] font-mono tabular-nums text-[var(--depot-text-muted)] hidden xs:inline">
-                Stand{' '}
-                {new Date(lastRefreshedAt).toLocaleTimeString('de-DE', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-              </span>
-            )}
             <button
               type="button"
               data-testid="depot-action-refresh"
@@ -302,6 +348,34 @@ export function DepotPage() {
           </div>
         </div>
 
+        {/* Always visible Market-Data Simulation Notice */}
+        <p
+          data-testid="depot-market-simulation-notice"
+          className="text-[11px] sm:text-xs text-[var(--depot-text-secondary)] leading-relaxed"
+        >
+          {MARKET_DATA_SIMULATION_NOTICE}
+        </p>
+
+        {/* Conditional Stale Notice */}
+        {hasStaleQuotes && (
+          <div
+            data-testid="depot-stale-data-notice"
+            className="rounded-xl border border-[var(--depot-warning)]/40 bg-[var(--depot-warning)]/10 px-3.5 py-2 text-xs text-[var(--depot-text-primary)]"
+          >
+            {formatStaleQuoteNotice(sampleTimestamp)}
+          </div>
+        )}
+
+        {/* Conditional Fallback Notice */}
+        {hasFallbackQuotes && (
+          <div
+            data-testid="depot-fallback-data-notice"
+            className="rounded-xl border border-[var(--depot-border)] bg-[var(--depot-bg-secondary)] px-3.5 py-2 text-xs text-[var(--depot-text-secondary)]"
+          >
+            {FALLBACK_QUOTE_NOTICE}
+          </div>
+        )}
+
         {/* Expandable Info Disclosure */}
         {showStatusInfo && (
           <div className="rounded-xl border border-[var(--depot-border)] bg-[var(--depot-bg-secondary)] p-3.5 text-xs text-[var(--depot-text-secondary)] space-y-1.5">
@@ -309,14 +383,45 @@ export function DepotPage() {
               Hinweis zur Simulation & Datenquelle
             </div>
             <p className="leading-relaxed">
-              Kein echtes Geld · Keine echten Börsenaufträge · Keine Anlageberatung.{' '}
-              {providerStatus.mode === 'demo'
-                ? 'Alle Kurse im Bildungs-Demomodus sind feste, deterministische Beispieldaten (keine zufälligen Kurssprünge).'
-                : `Datenquelle: ${providerStatus.providerName} (${providerStatus.statusLabel}).`}
+              {VIRTUAL_DEPOT_NOTICE} {MARKET_DATA_SIMULATION_NOTICE}
+            </p>
+            <p className="text-[11px] text-[var(--depot-text-muted)]">
+              Quellen im Schulprototyp: Börse Frankfurt (Xetra-Kurse in EUR), Nasdaq (US-Aktien in USD) sowie EZB-Referenzwechselkurs über Frankfurter API.
             </p>
           </div>
         )}
       </header>
+
+      {/* Newly Unlocked Asset Class Banner */}
+      {newlyUnlockedNotice && (
+        <div
+          role="status"
+          data-testid="depot-unlock-banner"
+          className="rounded-xl border border-[var(--depot-accent-lime)]/50 bg-[var(--depot-accent-lime)]/10 p-3.5 flex items-center justify-between gap-3 text-xs"
+        >
+          <div className="flex items-center gap-2.5">
+            <Sparkles
+              className="h-4 w-4 text-[var(--depot-accent-lime)] shrink-0"
+              aria-hidden="true"
+            />
+            <div>
+              <strong className="font-bold text-[var(--depot-text-primary)]">
+                {UNLOCK_NOTIFICATION_TEXT}
+              </strong>
+              <span className="text-[var(--depot-text-secondary)] ml-1.5">
+                Durch deinen Lernfortschritt stehen weitere Wertpapiere zur Verfügung.
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={dismissUnlockedNotice}
+            className="min-h-[30px] px-2 py-1 font-semibold text-[var(--depot-text-primary)] underline shrink-0"
+          >
+            Ausblenden
+          </button>
+        </div>
+      )}
 
       {/* Market Error Alert */}
       {marketError && (
@@ -359,7 +464,7 @@ export function DepotPage() {
               id="depot-overview-heading"
               className="text-xs font-semibold text-[var(--depot-text-secondary)]"
             >
-              {valuation.portfolioName} · Gesamtwert
+              Virtuelles Gesamtvermögen ({valuation.portfolioName})
             </h1>
             <div
               data-testid="depot-total-value"
@@ -367,31 +472,36 @@ export function DepotPage() {
             >
               {formatEuro(valuation.totalPortfolioValueEur, 2)}
             </div>
-            <div
-              data-testid="depot-total-gain-loss"
-              className={`inline-flex items-center gap-1 font-mono text-xs sm:text-sm font-bold tabular-nums ${
-                isPositive
-                  ? 'text-[var(--depot-positive)]'
-                  : isNegative
-                    ? 'text-[var(--depot-negative)]'
-                    : 'text-[var(--depot-text-secondary)]'
-              }`}
-            >
-              {isPositive && (
-                <ArrowUpRight className="h-4 w-4 shrink-0" aria-hidden="true" />
-              )}
-              {isNegative && (
-                <ArrowDownRight className="h-4 w-4 shrink-0" aria-hidden="true" />
-              )}
-              <span>
-                {formatSignedEuro(valuation.totalGainLossEur, 2)} ·{' '}
-                {formatSignedPercent(valuation.totalPerformancePercent, 2)}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-[var(--depot-text-muted)]">
+                Virtueller Gewinn oder Verlust:
               </span>
+              <div
+                data-testid="depot-total-gain-loss"
+                className={`inline-flex items-center gap-1 font-mono text-xs sm:text-sm font-bold tabular-nums ${
+                  isPositive
+                    ? 'text-[var(--depot-positive)]'
+                    : isNegative
+                      ? 'text-[var(--depot-negative)]'
+                      : 'text-[var(--depot-text-secondary)]'
+                }`}
+              >
+                {isPositive && (
+                  <ArrowUpRight className="h-4 w-4 shrink-0" aria-hidden="true" />
+                )}
+                {isNegative && (
+                  <ArrowDownRight className="h-4 w-4 shrink-0" aria-hidden="true" />
+                )}
+                <span>
+                  {formatSignedEuro(valuation.totalGainLossEur, 2)} (
+                  {formatSignedPercent(valuation.totalPerformancePercent, 2)})
+                </span>
+              </div>
             </div>
           </div>
 
-          {/* Single Primary CTA */}
-          <div className="flex items-center gap-2.5">
+          {/* Primary CTAs */}
+          <div className="flex flex-wrap items-center gap-2.5">
             <button
               type="button"
               data-testid="depot-action-invest"
@@ -399,15 +509,27 @@ export function DepotPage() {
               className="depot-btn-lime w-full sm:w-auto inline-flex min-h-[46px] items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold whitespace-nowrap"
             >
               <Plus className="h-4 w-4" aria-hidden="true" />
-              <span>Investieren</span>
+              <span>Kaufen / Investieren</span>
             </button>
+            {valuation.valuedPositions.length > 0 && (
+              <button
+                type="button"
+                data-testid="depot-action-sell"
+                onClick={() => setSubView({ type: 'sell', symbol: null })}
+                className="depot-btn-secondary w-full sm:w-auto inline-flex min-h-[46px] items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold whitespace-nowrap"
+              >
+                <span>Verkaufen</span>
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Secondary Cash & Invested Bar */}
-        <div className="grid grid-cols-2 gap-3 pt-4 border-t border-[var(--depot-border)] text-xs">
+        {/* Overview Key Metrics Bar */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 border-t border-[var(--depot-border)] text-xs">
           <div>
-            <span className="text-[var(--depot-text-muted)] block">Verfügbar</span>
+            <span className="text-[var(--depot-text-muted)] block">
+              Verfügbares Spielgeld
+            </span>
             <span
               data-testid="depot-cash-value"
               className="mt-0.5 font-mono text-sm sm:text-base font-bold tabular-nums text-[var(--depot-text-primary)] block"
@@ -416,12 +538,36 @@ export function DepotPage() {
             </span>
           </div>
           <div>
-            <span className="text-[var(--depot-text-muted)] block">Investiert</span>
+            <span className="text-[var(--depot-text-muted)] block">
+              Wert der Anlagen
+            </span>
             <span
               data-testid="depot-positions-value"
               className="mt-0.5 font-mono text-sm sm:text-base font-bold tabular-nums text-[var(--depot-text-primary)] block"
             >
               {formatEuro(valuation.positionsMarketValueEur, 2)}
+            </span>
+          </div>
+          <div>
+            <span className="text-[var(--depot-text-muted)] block">
+              Anzahl Positionen
+            </span>
+            <span
+              data-testid="depot-positions-count"
+              className="mt-0.5 font-mono text-sm sm:text-base font-bold tabular-nums text-[var(--depot-text-primary)] block"
+            >
+              {valuation.valuedPositions.length}
+            </span>
+          </div>
+          <div>
+            <span className="text-[var(--depot-text-muted)] block">
+              Kursstand / Datum
+            </span>
+            <span
+              data-testid="depot-price-date"
+              className="mt-0.5 font-mono text-sm sm:text-base font-bold tabular-nums text-[var(--depot-text-primary)] block"
+            >
+              {priceDateFormatted}
             </span>
           </div>
         </div>
@@ -458,10 +604,10 @@ export function DepotPage() {
           <div className="depot-card p-5 sm:p-6 space-y-4">
             <div className="space-y-1">
               <h3 className="text-base font-bold text-[var(--depot-text-primary)]">
-                Noch keine Positionen
+                Noch keine Positionen im Übungsdepot
               </h3>
               <p className="text-xs sm:text-sm text-[var(--depot-text-secondary)] leading-relaxed">
-                Starte mit einem breit gestreuten Welt-ETF oder suche gezielt nach einzelnen Wertpapieren.
+                Du startest mit 5.000,00 € virtuellem Spielgeld. Kaufe zum Einstieg den direkt freigeschalteten MSCI World ETF oder schalte durch abgeschlossene Lektionen weitere Anlageklassen frei.
               </p>
             </div>
 
@@ -481,7 +627,7 @@ export function DepotPage() {
                 onClick={() => void handleOpenBuyForSymbol('EUNL.DE')}
                 className="depot-btn-secondary inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-xs sm:text-sm font-semibold"
               >
-                <span>Mit einem Welt-ETF vergleichen</span>
+                <span>MSCI World ETF direkt testen</span>
                 <ArrowRight className="h-3.5 w-3.5 text-[var(--depot-accent-lime)]" aria-hidden="true" />
               </button>
             </div>
@@ -494,7 +640,9 @@ export function DepotPage() {
               const statusInfo = formatMarketDataStatusBadge(
                 pos.dataStatus,
                 pos.isDemo,
+                pos.priceTimestamp,
               );
+              const posDateLabel = formatGermanDateLabel(pos.priceTimestamp);
 
               return (
                 <article
@@ -512,7 +660,7 @@ export function DepotPage() {
                   aria-label={`${pos.name} (${pos.symbol}) Details öffnen`}
                   className="depot-card p-4 space-y-2.5 cursor-pointer hover:border-[var(--depot-accent-lime)]/50 transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--depot-accent-lime)]"
                 >
-                  {/* Row 1: Symbol & Performance */}
+                  {/* Row 1: Symbol & Virtual Profit/Loss */}
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="font-mono text-sm font-bold text-[var(--depot-text-primary)]">
@@ -524,6 +672,7 @@ export function DepotPage() {
                     </div>
 
                     <div
+                      data-testid={`position-pnl-${pos.symbol}`}
                       className={`inline-flex items-center gap-0.5 font-mono text-xs font-bold tabular-nums shrink-0 ${
                         posPositive
                           ? 'text-[var(--depot-positive)]'
@@ -539,13 +688,13 @@ export function DepotPage() {
                         <ArrowDownRight className="h-3.5 w-3.5" aria-hidden="true" />
                       )}
                       <span>
-                        {formatSignedPercent(pos.unrealizedGainLossPercent, 2)} ·{' '}
-                        {formatSignedEuro(pos.unrealizedGainLossEur, 2)}
+                        {formatSignedEuro(pos.unrealizedGainLossEur, 2)} (
+                        {formatSignedPercent(pos.unrealizedGainLossPercent, 2)})
                       </span>
                     </div>
                   </div>
 
-                  {/* Row 2: Name & Current Value */}
+                  {/* Row 2: Asset Name & Current Position Value */}
                   <div className="flex items-baseline justify-between gap-3">
                     <h3 className="text-sm font-semibold text-[var(--depot-text-secondary)] truncate">
                       {pos.name}
@@ -558,7 +707,7 @@ export function DepotPage() {
                     </div>
                   </div>
 
-                  {/* Row 3: Quantity, Avg Buy Price, Reference Price & Data Status */}
+                  {/* Row 3: Quantity, Avg Purchase Price, Current Cached Price */}
                   <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 pt-2 border-t border-[var(--depot-border)] text-[11px] text-[var(--depot-text-muted)] font-mono tabular-nums">
                     <div>
                       <span data-testid={`position-qty-${pos.symbol}`}>
@@ -567,19 +716,161 @@ export function DepotPage() {
                         })}{' '}
                         Stk.
                       </span>{' '}
-                      · Ø{' '}
+                      · Ø Kauf{' '}
                       <span data-testid={`position-avg-price-${pos.symbol}`}>
                         {formatEuro(pos.averagePurchasePriceEur, 2)}
                       </span>{' '}
-                      · Kurs {formatEuro(pos.currentPriceEur, 2)}
+                      · Aktuell{' '}
+                      <span data-testid={`position-current-price-${pos.symbol}`}>
+                        {formatEuro(pos.currentPriceEur, 2)}
+                      </span>
                     </div>
-                    <span className="font-sans text-[10px] text-[var(--depot-text-muted)]">
-                      {pos.isDemo ? 'Beispieldaten' : statusInfo.shortText}
+                    <button
+                      type="button"
+                      data-testid={`position-sell-btn-${pos.symbol}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSubView({ type: 'sell', symbol: pos.symbol });
+                      }}
+                      className="font-sans text-[11px] font-bold text-[var(--depot-accent-lime)] hover:underline"
+                    >
+                      Verkaufen
+                    </button>
+                  </div>
+
+                  {/* Row 4: Price Timestamp & Data Status */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-[var(--depot-text-muted)]">
+                    <span data-testid={`position-timestamp-${pos.symbol}`}>
+                      Kursstand: {posDateLabel}
+                    </span>
+                    <span data-testid={`position-status-${pos.symbol}`}>
+                      {pos.isDemo || pos.dataStatus === 'fallback'
+                        ? FALLBACK_QUOTE_NOTICE
+                        : pos.dataStatus === 'stale'
+                          ? formatStaleQuoteNotice(pos.priceTimestamp)
+                          : statusInfo.shortText}
                     </span>
                   </div>
                 </article>
               );
             })}
+          </div>
+        )}
+      </section>
+
+      {/* D2. LESSON-BASED ASSET UNLOCKING OVERVIEW */}
+      <section
+        aria-labelledby="depot-unlocks-heading"
+        data-testid="depot-unlocks-section"
+        className="depot-card p-4 sm:p-5 space-y-3"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--depot-accent-lime)]">
+              {UNLOCK_NOTIFICATION_TEXT} · Lernfortschritt
+            </div>
+            <h2
+              id="depot-unlocks-heading"
+              className="mt-0.5 text-sm sm:text-base font-bold text-[var(--depot-text-primary)]"
+            >
+              Freigeschaltete Wertpapiere ({unlockedTradableCount} von{' '}
+              {DEMO_INSTRUMENTS.length})
+            </h2>
+          </div>
+
+          <button
+            type="button"
+            data-testid="depot-toggle-unlocks-btn"
+            onClick={() => setShowCatalogueUnlocks((v) => !v)}
+            aria-expanded={showCatalogueUnlocks}
+            className="depot-btn-secondary inline-flex min-h-[38px] items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold shrink-0"
+          >
+            <span>{showCatalogueUnlocks ? 'Ausblenden' : 'Katalog & Regeln'}</span>
+            {showCatalogueUnlocks ? (
+              <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+          </button>
+        </div>
+
+        {showCatalogueUnlocks && (
+          <div className="pt-3 border-t border-[var(--depot-border)] space-y-3 text-xs">
+            <p className="text-[var(--depot-text-secondary)] leading-relaxed">
+              Im Übungsdepot schaltest du neue Anlageklassen schrittweise durch abgeschlossene Lektionen frei:
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {DEMO_INSTRUMENTS.map((inst) => {
+                const unlocked = isInstrumentUnlocked(inst.symbol);
+                const q = resolveInstrumentQuote(inst.symbol);
+                return (
+                  <div
+                    key={inst.symbol}
+                    data-testid={`catalogue-item-${inst.symbol}`}
+                    className={`rounded-xl border p-3 flex items-center justify-between gap-2 ${
+                      unlocked
+                        ? 'border-[var(--depot-border)] bg-[var(--depot-bg-secondary)]'
+                        : 'border-[var(--depot-border)]/60 bg-[var(--depot-bg-secondary)]/50 opacity-80'
+                    }`}
+                  >
+                    <div className="min-w-0 space-y-0.5">
+                      <div className="flex items-center gap-1.5">
+                        {unlocked ? (
+                          <Unlock
+                            className="h-3.5 w-3.5 text-[var(--depot-accent-lime)] shrink-0"
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <Lock
+                            className="h-3.5 w-3.5 text-[var(--depot-text-muted)] shrink-0"
+                            aria-hidden="true"
+                          />
+                        )}
+                        <span className="font-mono font-bold text-[var(--depot-text-primary)]">
+                          {inst.symbol}
+                        </span>
+                        <span className="text-[10px] text-[var(--depot-text-muted)]">
+                          {inst.assetType}
+                        </span>
+                      </div>
+                      <div className="text-[var(--depot-text-secondary)] font-medium truncate">
+                        {inst.name}
+                      </div>
+                      <div className="text-[10px] text-[var(--depot-text-muted)]">
+                        {inst.unlockRequirementText ?? inst.unlockReasonLabel ?? 'Sofort verfügbar'}
+                      </div>
+                    </div>
+
+                    <div className="text-right shrink-0 space-y-1">
+                      {q && (
+                        <div className="font-mono text-xs font-bold text-[var(--depot-text-primary)]">
+                          {formatEuro(
+                            q.priceEur && q.priceEur > 0 ? q.priceEur : q.price,
+                            2,
+                          )}
+                        </div>
+                      )}
+                      {unlocked ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleOpenBuyForSymbol(inst.symbol)}
+                          className="text-[11px] font-bold text-[var(--depot-accent-lime)] hover:underline"
+                        >
+                          Kaufen →
+                        </button>
+                      ) : (
+                        <AppLink
+                          to="/lernen"
+                          className="text-[11px] font-semibold text-[var(--depot-text-muted)] hover:text-[var(--depot-accent-lime)] underline"
+                        >
+                          Lektion öffnen
+                        </AppLink>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </section>
@@ -735,10 +1026,11 @@ export function DepotPage() {
         </section>
       )}
 
-      {/* Optional Collapsible Simulated Transactions Log */}
+      {/* Simulated Transactions History */}
       {portfolio.transactions.length > 0 && (
         <section
           aria-labelledby="depot-transactions-heading"
+          data-testid="depot-transactions-section"
           className="depot-card p-4 sm:p-5 space-y-3"
         >
           <div className="flex items-center justify-between gap-2">
@@ -751,7 +1043,7 @@ export function DepotPage() {
                 id="depot-transactions-heading"
                 className="text-sm font-bold text-[var(--depot-text-primary)]"
               >
-                Transaktionen ({portfolio.transactions.length})
+                Transaktionshistorie ({portfolio.transactions.length})
               </h2>
             </div>
             <button
@@ -766,22 +1058,26 @@ export function DepotPage() {
 
           {showTransactions && (
             <div className="divide-y divide-[var(--depot-border)] pt-2 border-t border-[var(--depot-border)] text-xs">
-              {portfolio.transactions.slice(0, 8).map((tx) => (
+              {portfolio.transactions.slice(0, 10).map((tx) => (
                 <div
                   key={tx.id}
+                  data-testid={`transaction-row-${tx.id}`}
                   className="py-2.5 flex items-center justify-between gap-2"
                 >
                   <div className="min-w-0">
                     <div className="font-semibold text-[var(--depot-text-primary)] truncate">
-                      {tx.type === 'BUY' ? 'Kauf' : 'Verkauf'} · {tx.symbol}
+                      {tx.type === 'BUY' ? 'Kauf' : 'Verkauf'} · {tx.instrumentName} ({tx.symbol})
                     </div>
                     <div className="text-[11px] text-[var(--depot-text-muted)] font-mono tabular-nums">
-                      {tx.quantity.toLocaleString('de-DE')} Stk. ×{' '}
-                      {formatEuro(tx.priceEur, 2)}
+                      {tx.quantity.toLocaleString('de-DE', {
+                        maximumFractionDigits: 4,
+                      })}{' '}
+                      Stk. × {formatEuro(tx.executionPriceEur ?? tx.priceEur, 2)} · Stand{' '}
+                      {formatGermanDateLabel(tx.quoteFetchedAt ?? tx.priceTimestamp)}
                     </div>
                   </div>
                   <div className="text-right font-mono font-bold tabular-nums text-[var(--depot-text-primary)] shrink-0">
-                    {formatEuro(tx.totalAmountEur, 2)}
+                    {formatEuro(tx.totalEur ?? tx.totalAmountEur, 2)}
                   </div>
                 </div>
               ))}
@@ -793,13 +1089,13 @@ export function DepotPage() {
       {/* Compact Legal & Reset Footer */}
       <footer className="px-1 pt-1 pb-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] text-[var(--depot-text-muted)]">
         <span>
-          Nur zu Bildungszwecken · Keine Anlageberatung · Alle Transaktionen sind Simulationen.
+          {VIRTUAL_DEPOT_NOTICE} {MARKET_DATA_SIMULATION_NOTICE}
         </span>
         <AppLink
           to="/mehr"
           className="font-semibold text-[var(--depot-text-secondary)] hover:text-[var(--depot-accent-lime)] underline shrink-0"
         >
-          Depot zurücksetzen
+          Depot zurücksetzen ({unlockedAssets.length} Werte freigeschaltet)
         </AppLink>
       </footer>
     </div>
