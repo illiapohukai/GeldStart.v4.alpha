@@ -5,6 +5,8 @@ on:
     branches:
       - main
   workflow_dispatch:
+  schedule:
+    - cron: "30 21 * * 1-5"
 
 permissions:
   contents: read
@@ -37,6 +39,9 @@ jobs:
       - name: Run unit tests
         run: npm test
 
+      - name: Generate static market snapshot
+        run: npm run market:snapshot
+
       - name: Build static production bundle for GitHub Pages
         env:
           VITE_BASE_PATH: /${{ github.event.repository.name }}/
@@ -47,6 +52,7 @@ jobs:
           test -f dist/index.html
           test -f dist/404.html
           test -f dist/favicon.svg
+          test -f dist/market-prices.json
 
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v5

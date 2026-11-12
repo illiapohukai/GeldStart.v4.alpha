@@ -13,6 +13,7 @@ import type {
   MarketQuote,
   NormalizedQuoteStatus,
   SharedQuoteCache,
+  StaticMarketSnapshot,
   SupportedCurrency,
   TradingVenue,
 } from './market-types';
@@ -824,6 +825,14 @@ export class PrototypeMarketDataProvider implements MarketDataProvider {
           status: 'available',
         };
       } catch {
+        const priorFxFromQuote = priorCache?.quoteList?.find(
+          (q) =>
+            q.currency === 'USD' &&
+            !q.isDemo &&
+            q.status !== 'fallback' &&
+            Number.isFinite(q.fxRateToEur) &&
+            q.fxRateToEur > 0,
+        );
         if (
           priorCache &&
           Number.isFinite(priorCache.fxRateUsdToEur) &&
@@ -833,6 +842,12 @@ export class PrototypeMarketDataProvider implements MarketDataProvider {
           fxInfo = {
             rateUsdToEur: priorCache.fxRateUsdToEur,
             date: priorCache.fxReferenceDate,
+            status: 'stale',
+          };
+        } else if (priorFxFromQuote) {
+          fxInfo = {
+            rateUsdToEur: priorFxFromQuote.fxRateToEur,
+            date: priorFxFromQuote.fxReferenceDate ?? FALLBACK_PRICE_DATE,
             status: 'stale',
           };
         } else {
@@ -914,7 +929,30 @@ export class PrototypeMarketDataProvider implements MarketDataProvider {
       const matchingAssets = keyToAssets.get(key) ?? [canonicalAsset];
 
       for (const targetAsset of matchingAssets) {
+        const prevQuote = findPreviousValidQuote(priorCache, targetAsset);
+
         if (res.status === 'fulfilled') {
+          // Never replace a valid previous quote with a PDF fallback
+          if (
+            (res.value.status === 'fallback' || res.value.isDemo) &&
+            prevQuote
+          ) {
+            const staleDate = (
+              prevQuote.marketTime ??
+              prevQuote.fetchedAt ??
+              nowIso
+            ).slice(0, 10);
+            outputQuotes.push({
+              ...prevQuote,
+              assetId: targetAsset.id,
+              symbol: targetAsset.symbol ?? targetAsset.id,
+              status: 'stale',
+              isDemo: false,
+              providerName: `Letzter verfügbarer Kurs vom ${staleDate}. Die heutige Aktualisierung war nicht möglich.`,
+            });
+            continue;
+          }
+
           outputQuotes.push({
             ...res.value,
             assetId: targetAsset.id,
@@ -923,14 +961,8 @@ export class PrototypeMarketDataProvider implements MarketDataProvider {
           continue;
         }
 
-        // Refresh failed for this asset: check if we have a last successful quote in priorCache
-        const prevQuote =
-          priorCache?.quotes[targetAsset.id.toUpperCase()] ??
-          (targetAsset.symbol
-            ? priorCache?.quotes[targetAsset.symbol.toUpperCase()]
-            : undefined);
-
-        if (prevQuote && prevQuote.status !== 'fallback' && !prevQuote.isDemo) {
+        // Refresh failed for this asset: retain previous valid quote as stale
+        if (prevQuote) {
           const staleDate = (
             prevQuote.marketTime ??
             prevQuote.fetchedAt ??
@@ -953,6 +985,38 @@ export class PrototypeMarketDataProvider implements MarketDataProvider {
 
     return outputQuotes;
   }
+}
+
+export function findPreviousValidQuote(
+  priorCache: SharedQuoteCache | null | undefined,
+  targetAsset: MarketAsset,
+): MarketQuote | null {
+  if (!priorCache) return null;
+  const idUpper = targetAsset.id.toUpperCase();
+  const symUpper = (targetAsset.symbol ?? targetAsset.id).toUpperCase();
+
+  const candidate =
+    priorCache.quotes?.[idUpper] ??
+    priorCache.quotes?.[targetAsset.id] ??
+    priorCache.quotes?.[symUpper] ??
+    (targetAsset.symbol ? priorCache.quotes?.[targetAsset.symbol] : undefined) ??
+    priorCache.quoteList?.find(
+      (q) =>
+        q.assetId?.toUpperCase() === idUpper ||
+        q.symbol?.toUpperCase() === symUpper,
+    );
+
+  if (
+    candidate &&
+    candidate.status !== 'fallback' &&
+    candidate.status !== 'demo' &&
+    !candidate.isDemo &&
+    Number.isFinite(candidate.priceEur) &&
+    candidate.priceEur > 0
+  ) {
+    return candidate;
+  }
+  return null;
 }
 
 export const DAILY_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -1106,3 +1170,265 @@ export function getCuratedAssetByIdentifier(
 export function getCuratedInstrumentMetadataList() {
   return DEMO_INSTRUMENTS;
 }
+
+/**
+ * Validates and normalizes an existing static market snapshot JSON object
+ * loaded from `public/market-prices.json` or fetched by the frontend.
+ */
+export function parseStaticMarketSnapshot(
+  raw: unknown,
+): StaticMarketSnapshot | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+
+  const quotesRaw = obj.quotes;
+  const quoteListRaw = Array.isArray(obj.quoteList)
+    ? (obj.quoteList as MarketQuote[])
+    : [];
+
+  if (
+    (!quotesRaw || typeof quotesRaw !== 'object') &&
+    quoteListRaw.length === 0
+  ) {
+    return null;
+  }
+
+  const quotes: Record<string, MarketQuote> = {};
+
+  for (const item of quoteListRaw) {
+    if (
+      item &&
+      typeof item === 'object' &&
+      typeof item.priceEur === 'number' &&
+      Number.isFinite(item.priceEur) &&
+      item.priceEur > 0
+    ) {
+      if (item.assetId) {
+        quotes[item.assetId] = item;
+        quotes[item.assetId.toUpperCase()] = item;
+      }
+      if (item.symbol) {
+        quotes[item.symbol] = item;
+        quotes[item.symbol.toUpperCase()] = item;
+      }
+    }
+  }
+
+  if (quotesRaw && typeof quotesRaw === 'object') {
+    for (const [key, value] of Object.entries(
+      quotesRaw as Record<string, MarketQuote>,
+    )) {
+      if (
+        value &&
+        typeof value === 'object' &&
+        typeof value.priceEur === 'number' &&
+        Number.isFinite(value.priceEur) &&
+        value.priceEur > 0
+      ) {
+        quotes[key] = value;
+        quotes[key.toUpperCase()] = value;
+        if (value.assetId) quotes[value.assetId.toUpperCase()] = value;
+        if (value.symbol) quotes[value.symbol.toUpperCase()] = value;
+      }
+    }
+  }
+
+  const normalizedQuoteList: MarketQuote[] =
+    quoteListRaw.length > 0
+      ? quoteListRaw
+      : Array.from(
+          new Map(
+            Object.values(quotes).map((q) => [
+              (q.assetId ?? q.symbol).toUpperCase(),
+              q,
+            ]),
+          ).values(),
+        );
+
+  if (normalizedQuoteList.length === 0) {
+    return null;
+  }
+
+  const generatedAt =
+    typeof obj.generatedAt === 'string' && obj.generatedAt.trim()
+      ? obj.generatedAt
+      : typeof obj.fetchedAt === 'string' && obj.fetchedAt.trim()
+        ? obj.fetchedAt
+        : new Date().toISOString();
+
+  const fetchedAt =
+    typeof obj.fetchedAt === 'string' && obj.fetchedAt.trim()
+      ? obj.fetchedAt
+      : generatedAt;
+
+  const fxRateUsdToEur =
+    typeof obj.fxRateUsdToEur === 'number' &&
+    Number.isFinite(obj.fxRateUsdToEur) &&
+    obj.fxRateUsdToEur > 0
+      ? obj.fxRateUsdToEur
+      : 0.9215;
+
+  const fxReferenceDate =
+    typeof obj.fxReferenceDate === 'string' && obj.fxReferenceDate.trim()
+      ? obj.fxReferenceDate
+      : FALLBACK_PRICE_DATE;
+
+  const fxStatus: 'available' | 'stale' | 'fallback' =
+    obj.fxStatus === 'available' ||
+    obj.fxStatus === 'stale' ||
+    obj.fxStatus === 'fallback'
+      ? obj.fxStatus
+      : 'available';
+
+  const records: MarketPriceRecord[] = Array.isArray(obj.records)
+    ? (obj.records as MarketPriceRecord[])
+    : normalizedQuoteList.map(toMarketPriceRecord);
+
+  const nonCashQuotes = normalizedQuoteList.filter(
+    (q) => q.assetId !== 'EUR-CASH' && q.symbol !== 'EUR-CASH',
+  );
+  const allFallback =
+    nonCashQuotes.length > 0 &&
+    nonCashQuotes.every((q) => q.status === 'fallback' || q.isDemo);
+  const hasStale = nonCashQuotes.some((q) => q.status === 'stale');
+
+  const status: NormalizedQuoteStatus =
+    obj.status === 'available' ||
+    obj.status === 'live' ||
+    obj.status === 'delayed' ||
+    obj.status === 'stale' ||
+    obj.status === 'fallback'
+      ? obj.status
+      : allFallback
+        ? 'fallback'
+        : hasStale
+          ? 'stale'
+          : 'delayed';
+
+  const marketTime =
+    typeof obj.marketTime === 'string' && obj.marketTime.trim()
+      ? obj.marketTime
+      : (nonCashQuotes.find((q) => q.marketTime)?.marketTime ?? fetchedAt);
+
+  const source =
+    typeof obj.source === 'string' && obj.source.trim()
+      ? obj.source
+      : 'boerse-frankfurt-prototype+nasdaq-prototype+frankfurter-fx';
+
+  return {
+    generatedAt,
+    fetchedAt,
+    marketTime,
+    fxRateUsdToEur,
+    fxReferenceDate,
+    fxStatus,
+    source,
+    status,
+    quotes,
+    quoteList: normalizedQuoteList,
+    records,
+    cacheDateKey:
+      typeof obj.cacheDateKey === 'string' && obj.cacheDateKey.trim()
+        ? obj.cacheDateKey
+        : generatedAt.slice(0, 10),
+    expiresAt:
+      typeof obj.expiresAt === 'number' && Number.isFinite(obj.expiresAt)
+        ? obj.expiresAt
+        : Date.parse(generatedAt) + DAILY_CACHE_TTL_MS,
+    refreshCount:
+      typeof obj.refreshCount === 'number' && Number.isFinite(obj.refreshCount)
+        ? obj.refreshCount
+        : 1,
+  };
+}
+
+export interface GenerateStaticSnapshotOptions {
+  previousSnapshot?: SharedQuoteCache | StaticMarketSnapshot | null;
+  fetchFn?: typeof fetch;
+  nowFn?: () => Date;
+  concurrency?: number;
+  timeoutMs?: number;
+  assets?: MarketAsset[];
+}
+
+/**
+ * Generates a complete, fault-tolerant static market snapshot for `public/market-prices.json`.
+ * - Retrieves USD/EUR only once;
+ * - Retrieves each unique asset only once (concurrency limit 5);
+ * - Retains previous valid quote as `stale` if an individual quote fails;
+ * - Never replaces a valid previous quote with a PDF fallback.
+ */
+export async function generateStaticMarketSnapshot(
+  options: GenerateStaticSnapshotOptions = {},
+): Promise<StaticMarketSnapshot> {
+  const nowFn = options.nowFn ?? (() => new Date());
+  const now = nowFn();
+  const generatedAt = now.toISOString();
+  const assets = options.assets ?? CURATED_MARKET_ASSETS;
+  const prior = options.previousSnapshot ?? null;
+
+  const provider = new PrototypeMarketDataProvider({
+    fetchFn: options.fetchFn,
+    nowFn,
+    concurrency: options.concurrency ?? 5,
+    timeoutMs: options.timeoutMs,
+    previousCache: prior,
+  });
+
+  const quoteList = await provider.getQuotes(assets, prior);
+  const fx = provider.getLastFxResult() ?? {
+    rateUsdToEur: prior?.fxRateUsdToEur ?? 0.9215,
+    date: prior?.fxReferenceDate ?? FALLBACK_PRICE_DATE,
+    status: prior?.fxStatus ?? 'fallback',
+  };
+
+  const quotes: Record<string, MarketQuote> = {};
+  const records: MarketPriceRecord[] = [];
+
+  for (const q of quoteList) {
+    quotes[q.assetId] = q;
+    quotes[q.assetId.toUpperCase()] = q;
+    quotes[q.symbol] = q;
+    quotes[q.symbol.toUpperCase()] = q;
+    records.push(toMarketPriceRecord(q));
+  }
+
+  const nonCashQuotes = quoteList.filter(
+    (q) => q.assetId !== 'EUR-CASH' && q.symbol !== 'EUR-CASH',
+  );
+  const allFallback =
+    nonCashQuotes.length > 0 &&
+    nonCashQuotes.every((q) => q.status === 'fallback' || q.isDemo);
+  const hasStale = nonCashQuotes.some((q) => q.status === 'stale');
+
+  const overallStatus: NormalizedQuoteStatus = allFallback
+    ? 'fallback'
+    : hasStale
+      ? 'stale'
+      : 'delayed';
+
+  const latestMarketTime =
+    nonCashQuotes
+      .map((q) => q.marketTime)
+      .filter((t): t is string => typeof t === 'string' && t.length > 0)
+      .sort()
+      .pop() ?? generatedAt;
+
+  return {
+    generatedAt,
+    fetchedAt: generatedAt,
+    marketTime: latestMarketTime,
+    fxRateUsdToEur: fx.rateUsdToEur,
+    fxReferenceDate: fx.date,
+    fxStatus: fx.status,
+    source: 'boerse-frankfurt-prototype+nasdaq-prototype+frankfurter-fx',
+    status: overallStatus,
+    quotes,
+    quoteList,
+    records,
+    cacheDateKey: generatedAt.slice(0, 10),
+    expiresAt: now.getTime() + DAILY_CACHE_TTL_MS,
+    refreshCount: (prior?.refreshCount ?? 0) + 1,
+  };
+}
+

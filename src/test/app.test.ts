@@ -59,17 +59,21 @@ import {
   fetchBoerseFrankfurtPrototypeQuote,
   fetchFrankfurterUsdToEurRate,
   fetchNasdaqPrototypeQuote,
+  generateStaticMarketSnapshot,
   InMemoryMarketPriceRepository,
   parseBoerseFrankfurtSseEvent,
   parseNasdaqPrice,
   parseNasdaqQuotePayload,
+  parseStaticMarketSnapshot,
   SharedDailyQuoteCoordinator,
 } from '../lib/market-providers';
 import {
+  createMarketDataService,
   FALLBACK_QUOTE_NOTICE,
   formatMarketDataStatusBadge,
   formatStaleQuoteNotice,
   MARKET_DATA_SIMULATION_NOTICE,
+  resolveStaticSnapshotUrl,
   VIRTUAL_DEPOT_NOTICE,
 } from '../lib/market-service';
 import type { MarketAsset, MarketQuote } from '../lib/market-types';
@@ -1051,3 +1055,252 @@ describe('GitHub Pages Base Path Resolution', () => {
     }
   });
 });
+
+describe('Static GitHub Actions Market Snapshot & Frontend 3-Tier Priority', () => {
+  it('generates valid snapshot schema, issues one FX request and one quote request per unique asset', async () => {
+    let fxRequests = 0;
+    const requestedUrls: string[] = [];
+
+    const sapAsset = CURATED_MARKET_ASSETS.find((a) => a.id === 'SAP.DE')!;
+    const aaplAsset = CURATED_MARKET_ASSETS.find((a) => a.id === 'AAPL')!;
+    const cashAsset = CURATED_MARKET_ASSETS.find((a) => a.id === 'EUR-CASH')!;
+    // Include duplicate SAP.DE entry to verify source-qualified deduplication
+    const testAssets: MarketAsset[] = [cashAsset, sapAsset, { ...sapAsset }, aaplAsset];
+
+    const mockFetch: typeof fetch = async (input) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url.includes('frankfurter.dev')) {
+        fxRequests += 1;
+        return new Response(
+          JSON.stringify({ amount: 1, base: 'USD', date: '2026-11-12', rates: { EUR: 0.92 } }),
+          { status: 200 },
+        );
+      }
+      if (url.includes('api.nasdaq.com')) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              symbol: 'AAPL',
+              companyName: 'Apple Inc.',
+              primaryData: {
+                lastSalePrice: '$210.00',
+                netChange: '+1.50',
+                lastTradeTimestamp: 'Nov 12, 2026 4:00 PM ET',
+              },
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      const encoder = new TextEncoder();
+      const sse =
+        'data: {"isin":"DE0007164600","lastPrice":225.4,"currency":{"originalValue":"EUR"},"timestampLastPrice":"2026-11-12T17:35:00+01:00"}\n\n';
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(encoder.encode(sse));
+          c.close();
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    };
+
+    const snapshot = await generateStaticMarketSnapshot({
+      assets: testAssets,
+      fetchFn: mockFetch,
+      nowFn: () => new Date('2026-11-12T21:30:00.000Z'),
+      concurrency: 5,
+    });
+
+    assert.equal(fxRequests, 1, 'Should request USD/EUR FX rate exactly once');
+    assert.equal(
+      requestedUrls.filter((u) => u.includes('boerse-frankfurt.de')).length,
+      1,
+      'Should request duplicate SAP.DE asset only once',
+    );
+    assert.equal(
+      requestedUrls.filter((u) => u.includes('api.nasdaq.com')).length,
+      1,
+      'Should request AAPL asset only once',
+    );
+
+    // Verify required snapshot schema fields
+    assert.equal(snapshot.generatedAt, '2026-11-12T21:30:00.000Z');
+    assert.equal(snapshot.fetchedAt, '2026-11-12T21:30:00.000Z');
+    assert.equal(snapshot.fxReferenceDate, '2026-11-12');
+    assert.equal(snapshot.fxRateUsdToEur, 0.92);
+    assert.equal(snapshot.status, 'delayed');
+    assert.ok(snapshot.source.includes('boerse-frankfurt-prototype'));
+    assert.ok(snapshot.marketTime);
+    assert.ok(snapshot.quotes['SAP.DE']);
+    assert.equal(snapshot.quotes['SAP.DE']?.priceEur, 225.4);
+    assert.equal(snapshot.quotes['SAP.DE']?.source, 'boerse-frankfurt-prototype');
+    assert.equal(snapshot.quotes['SAP.DE']?.status, 'delayed');
+    assert.equal(snapshot.quotes.AAPL?.priceEur, 193.2);
+    assert.equal(snapshot.quotes.AAPL?.source, 'nasdaq-prototype');
+    assert.equal(snapshot.quotes.AAPL?.status, 'delayed');
+
+    const reparsed = parseStaticMarketSnapshot(JSON.parse(JSON.stringify(snapshot)));
+    assert.ok(reparsed);
+    assert.equal(reparsed.generatedAt, '2026-11-12T21:30:00.000Z');
+    assert.equal(reparsed.quotes['SAP.DE']?.priceEur, 225.4);
+  });
+
+  it('preserves previous valid quote as stale on refresh failure and never replaces it with PDF fallback', async () => {
+    const eunlAsset = CURATED_MARKET_ASSETS.find((a) => a.id === 'EUNL.DE')!;
+    const aaplAsset = CURATED_MARKET_ASSETS.find((a) => a.id === 'AAPL')!;
+    const testAssets: MarketAsset[] = [eunlAsset, aaplAsset];
+
+    // Day 1: Both quotes succeed
+    const day1Snapshot = await generateStaticMarketSnapshot({
+      assets: testAssets,
+      nowFn: () => new Date('2026-11-11T21:30:00.000Z'),
+      fetchFn: async (input) => {
+        const url = String(input);
+        if (url.includes('frankfurter.dev')) {
+          return new Response(
+            JSON.stringify({ amount: 1, base: 'USD', date: '2026-11-11', rates: { EUR: 0.92 } }),
+            { status: 200 },
+          );
+        }
+        if (url.includes('api.nasdaq.com')) {
+          return new Response(
+            JSON.stringify({
+              data: {
+                symbol: 'AAPL',
+                primaryData: {
+                  lastSalePrice: '$205.00',
+                  lastTradeTimestamp: 'Nov 11, 2026 4:00 PM ET',
+                },
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        const encoder = new TextEncoder();
+        const sse =
+          'data: {"isin":"IE00B4L5Y983","lastPrice":130.73,"currency":{"originalValue":"EUR"},"timestampLastPrice":"2026-11-11T17:35:00+01:00"}\n\n';
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(c) {
+              c.enqueue(encoder.encode(sse));
+              c.close();
+            },
+          }),
+          { status: 200 },
+        );
+      },
+    });
+
+    assert.equal(day1Snapshot.quotes['EUNL.DE']?.priceEur, 130.73);
+    assert.equal(day1Snapshot.quotes['EUNL.DE']?.status, 'delayed');
+    assert.equal(day1Snapshot.quotes.AAPL?.priceEur, 188.6);
+    assert.equal(day1Snapshot.quotes.AAPL?.status, 'delayed');
+
+    // Day 2: Complete provider outage -> retains Day 1 quotes as 'stale', never PDF fallback
+    const day2Snapshot = await generateStaticMarketSnapshot({
+      assets: testAssets,
+      previousSnapshot: day1Snapshot,
+      nowFn: () => new Date('2026-11-12T21:30:00.000Z'),
+      fetchFn: async () => new Response('Provider Outage', { status: 503 }),
+    });
+
+    assert.equal(day2Snapshot.status, 'stale');
+    assert.equal(day2Snapshot.quotes['EUNL.DE']?.priceEur, 130.73);
+    assert.equal(day2Snapshot.quotes['EUNL.DE']?.status, 'stale');
+    assert.equal(day2Snapshot.quotes['EUNL.DE']?.isDemo, false);
+    assert.equal(day2Snapshot.quotes.AAPL?.priceEur, 188.6);
+    assert.equal(day2Snapshot.quotes.AAPL?.status, 'stale');
+    assert.equal(day2Snapshot.quotes.AAPL?.isDemo, false);
+  });
+
+  it('resolves Vite BASE_URL path and enforces frontend priority: API -> static snapshot -> demo fallback', async () => {
+    assert.equal(resolveStaticSnapshotUrl('/'), '/market-prices.json');
+    assert.equal(resolveStaticSnapshotUrl('/GeldStart/'), '/GeldStart/market-prices.json');
+    assert.equal(resolveStaticSnapshotUrl('/GeldStart'), '/GeldStart/market-prices.json');
+
+    const eunlAsset = CURATED_MARKET_ASSETS.find((a) => a.id === 'EUNL.DE')!;
+    const staticSnapshot = await generateStaticMarketSnapshot({
+      assets: [eunlAsset],
+      nowFn: () => new Date('2026-11-12T21:30:00.000Z'),
+      fetchFn: async () => {
+        const encoder = new TextEncoder();
+        const sse =
+          'data: {"isin":"IE00B4L5Y983","lastPrice":130.73,"currency":{"originalValue":"EUR"},"timestampLastPrice":"2026-11-12T17:35:00+01:00"}\n\n';
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(c) {
+              c.enqueue(encoder.encode(sse));
+              c.close();
+            },
+          }),
+          { status: 200 },
+        );
+      },
+    });
+
+    const apiSnapshot = {
+      ...staticSnapshot,
+      quotes: {
+        ...staticSnapshot.quotes,
+        'EUNL.DE': {
+          ...staticSnapshot.quotes['EUNL.DE']!,
+          priceEur: 132.5,
+          price: 132.5,
+        },
+      },
+    };
+
+    // Priority A: /api/market/quotes available -> uses API
+    const requestedPriorityA: string[] = [];
+    const serviceA = createMarketDataService({
+      baseUrl: '/GeldStart/',
+      fetchFn: async (input) => {
+        const url = String(input);
+        requestedPriorityA.push(url);
+        if (url === '/api/market/quotes') {
+          return new Response(JSON.stringify(apiSnapshot), { status: 200 });
+        }
+        return new Response('Not found', { status: 404 });
+      },
+    });
+    const resA = await serviceA.getCatalogueSnapshot();
+    assert.equal(resA.quotes['EUNL.DE']?.priceEur, 132.5);
+    assert.deepEqual(requestedPriorityA, ['/api/market/quotes']);
+
+    // Priority B: /api/market/quotes unavailable (GitHub Pages) -> loads /GeldStart/market-prices.json
+    const requestedPriorityB: string[] = [];
+    const serviceB = createMarketDataService({
+      baseUrl: '/GeldStart/',
+      fetchFn: async (input) => {
+        const url = String(input);
+        requestedPriorityB.push(url);
+        if (url === '/GeldStart/market-prices.json') {
+          return new Response(JSON.stringify(staticSnapshot), { status: 200 });
+        }
+        return new Response('Not found', { status: 404 });
+      },
+    });
+    const resB = await serviceB.getCatalogueSnapshot();
+    const statusB = await serviceB.getProviderStatus();
+    assert.equal(resB.quotes['EUNL.DE']?.priceEur, 130.73);
+    assert.equal(resB.quotes['EUNL.DE']?.isDemo, false);
+    assert.equal(statusB.mode, 'live_provider');
+    assert.ok(requestedPriorityB.includes('/GeldStart/market-prices.json'));
+
+    // Priority C: Both API and static snapshot unavailable -> uses demo fallback
+    const serviceC = createMarketDataService({
+      baseUrl: '/GeldStart/',
+      fetchFn: async () => new Response('Not found', { status: 404 }),
+    });
+    const resC = await serviceC.getCatalogueSnapshot();
+    const statusC = await serviceC.getProviderStatus();
+    assert.equal(resC.quotes['EUNL.DE']?.status, 'fallback');
+    assert.equal(resC.quotes['EUNL.DE']?.isDemo, true);
+    assert.equal(statusC.mode, 'demo');
+  });
+});
+

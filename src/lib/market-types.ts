@@ -154,6 +154,13 @@ export interface SharedQuoteCache {
   refreshCount: number;
 }
 
+export interface StaticMarketSnapshot extends SharedQuoteCache {
+  generatedAt: string;
+  source: string;
+  marketTime: string | null;
+  status: NormalizedQuoteStatus;
+}
+
 export interface HistoricalPricePoint {
   date: string;
   close: number;

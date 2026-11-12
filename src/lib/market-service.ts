@@ -7,6 +7,7 @@ import {
   getDemoQuote,
   searchDemoInstruments,
 } from './market-demo-adapter';
+import { parseStaticMarketSnapshot } from './market-providers';
 import type {
   ExchangeRateQuote,
   HistoricalRange,
@@ -30,6 +31,24 @@ export const MARKET_DATA_SIMULATION_NOTICE =
 
 export const FALLBACK_QUOTE_NOTICE =
   'Demowert aus der Ausgangsversion, kein aktueller Börsenkurs.';
+
+export function getDefaultStaticSnapshotUrl(): string {
+  const baseUrl =
+    typeof import.meta !== 'undefined' &&
+    import.meta.env &&
+    typeof import.meta.env.BASE_URL === 'string'
+      ? import.meta.env.BASE_URL
+      : '/';
+  return `${baseUrl}market-prices.json`;
+}
+
+export function resolveStaticSnapshotUrl(baseUrl?: string): string {
+  if (typeof baseUrl === 'string' && baseUrl.length > 0) {
+    const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+    return `${normalizedBase}market-prices.json`;
+  }
+  return getDefaultStaticSnapshotUrl();
+}
 
 export function formatStaleQuoteNotice(marketTimeOrDate?: string | null): string {
   const formattedDate = formatGermanDateLabel(marketTimeOrDate);
@@ -197,8 +216,74 @@ function buildOfflineCatalogueFallback(): SharedQuoteCache {
   };
 }
 
+function deriveProviderStatusFromSnapshot(snapshot: SharedQuoteCache): ProviderStatusInfo {
+  const nonCashQuotes = (snapshot.quoteList ?? Object.values(snapshot.quotes)).filter(
+    (q) => q.assetId !== 'EUR-CASH' && q.symbol !== 'EUR-CASH',
+  );
+  const hasStaleQuotes = nonCashQuotes.some((q) => q.status === 'stale');
+  const hasFallbackQuotes = nonCashQuotes.some((q) => q.status === 'fallback' || q.isDemo);
+  const allFallback = nonCashQuotes.length > 0 && nonCashQuotes.every((q) => q.status === 'fallback' || q.isDemo);
+
+  if (allFallback) {
+    return {
+      mode: 'demo',
+      configured: false,
+      providerName: DEMO_STATUS_LABEL,
+      defaultStatus: 'demo',
+      statusLabel: DEMO_STATUS_LABEL,
+      disclaimerLabel: FALLBACK_QUOTE_NOTICE,
+      lastCheckedAt: snapshot.fetchedAt ?? new Date().toISOString(),
+      fxRateUsdToEur: snapshot.fxRateUsdToEur,
+      fxReferenceDate: snapshot.fxReferenceDate,
+      hasStaleQuotes: false,
+      hasFallbackQuotes: true,
+    };
+  }
+
+  return {
+    mode: 'live_provider',
+    configured: true,
+    providerName: 'Börse Frankfurt & Nasdaq (Prototyp-Marktdaten)',
+    defaultStatus: hasStaleQuotes ? 'stale' : 'delayed',
+    statusLabel: 'Verzögerte Börsenkurse (Börse Frankfurt / Nasdaq / EZB-Wechselkurs)',
+    disclaimerLabel: MARKET_DATA_SIMULATION_NOTICE,
+    lastCheckedAt: snapshot.fetchedAt ?? new Date().toISOString(),
+    fxRateUsdToEur: snapshot.fxRateUsdToEur,
+    fxReferenceDate: snapshot.fxReferenceDate,
+    hasStaleQuotes,
+    hasFallbackQuotes,
+  };
+}
+
+export interface MarketServiceConfigOptions {
+  fetchFn?: typeof fetch;
+  baseUrl?: string;
+}
+
 class DefaultMarketDataService implements MarketDataService {
   private forcedSimulatedError: MarketServiceErrorCode | null = null;
+  private readonly fetchImpl: typeof fetch;
+  private readonly customBaseUrl?: string;
+  private readonly usesGlobalCache: boolean;
+  private localSnapshot: { data: SharedQuoteCache; fetchedAtMs: number } | null = null;
+  private localProviderStatus: ProviderStatusInfo | null = null;
+
+  constructor(options?: MarketServiceConfigOptions) {
+    this.fetchImpl = options?.fetchFn ?? ((...args) => fetch(...args));
+    this.customBaseUrl = options?.baseUrl;
+    this.usesGlobalCache = !options;
+  }
+
+  private getSnapshotUrl(): string {
+    if (typeof this.customBaseUrl === 'string' && this.customBaseUrl.length > 0) {
+      return resolveStaticSnapshotUrl(this.customBaseUrl);
+    }
+    return typeof import.meta !== 'undefined' &&
+      import.meta.env &&
+      typeof import.meta.env.BASE_URL === 'string'
+      ? `${import.meta.env.BASE_URL}market-prices.json`
+      : '/market-prices.json';
+  }
 
   public setSimulatedErrorState(code: MarketServiceErrorCode | null): void {
     this.forcedSimulatedError = code;
@@ -240,64 +325,99 @@ class DefaultMarketDataService implements MarketDataService {
     }
   }
 
+  private applyLoadedSnapshot(payload: SharedQuoteCache): SharedQuoteCache {
+    const nowMs = Date.now();
+    const derivedStatus = deriveProviderStatusFromSnapshot(payload);
+    if (this.usesGlobalCache) {
+      sharedCatalogueSnapshot = { data: payload, fetchedAtMs: nowMs };
+      cachedProviderStatus = derivedStatus;
+      for (const [key, q] of Object.entries(payload.quotes)) {
+        quoteCache.set(key.toUpperCase(), { quote: q, fetchedAtMs: nowMs });
+      }
+      const isFallback = payload.fxStatus === 'fallback';
+      const fxQuote: ExchangeRateQuote = {
+        from: 'USD',
+        to: 'EUR',
+        rate: payload.fxRateUsdToEur,
+        date: payload.fxReferenceDate,
+        timestamp: payload.fetchedAt ?? new Date().toISOString(),
+        source: isFallback
+          ? DEMO_STATUS_LABEL
+          : 'Frankfurter EZB-Referenzkurs (USD/EUR)',
+        status: isFallback ? 'fallback' : 'delayed',
+        isDemo: isFallback,
+      };
+      fxCache.set('USD_EUR', { fx: fxQuote, fetchedAtMs: nowMs });
+    } else {
+      this.localSnapshot = { data: payload, fetchedAtMs: nowMs };
+      this.localProviderStatus = derivedStatus;
+    }
+    return payload;
+  }
+
   async getCatalogueSnapshot(options?: { forceRefresh?: boolean }): Promise<SharedQuoteCache> {
     this.checkSimulatedError();
     const now = Date.now();
+    const currentCached = this.usesGlobalCache ? sharedCatalogueSnapshot : this.localSnapshot;
 
     if (
       !options?.forceRefresh &&
-      sharedCatalogueSnapshot &&
-      now - sharedCatalogueSnapshot.fetchedAtMs < CATALOGUE_CACHE_TTL_MS
+      currentCached &&
+      now - currentCached.fetchedAtMs < CATALOGUE_CACHE_TTL_MS
     ) {
-      return sharedCatalogueSnapshot.data;
+      return currentCached.data;
     }
 
-    if (!options?.forceRefresh && pendingCataloguePromise) {
+    if (this.usesGlobalCache && !options?.forceRefresh && pendingCataloguePromise) {
       return pendingCataloguePromise;
     }
 
-    pendingCataloguePromise = (async () => {
+    const loadTask = (async () => {
+      // Priority A: Same-origin /api/market/quotes when available in AI Studio or local full-stack dev
       try {
-        const res = await fetch('/api/market/quotes', {
+        const res = await this.fetchImpl('/api/market/quotes', {
           headers: { Accept: 'application/json' },
         });
         if (res.ok) {
-          const payload = (await res.json()) as SharedQuoteCache;
-          if (payload && payload.quotes && typeof payload.quotes === 'object') {
-            sharedCatalogueSnapshot = { data: payload, fetchedAtMs: Date.now() };
-            for (const [key, q] of Object.entries(payload.quotes)) {
-              quoteCache.set(key.toUpperCase(), { quote: q, fetchedAtMs: Date.now() });
-            }
-            const isFallback = payload.fxStatus === 'fallback';
-            const fxQuote: ExchangeRateQuote = {
-              from: 'USD',
-              to: 'EUR',
-              rate: payload.fxRateUsdToEur,
-              date: payload.fxReferenceDate,
-              timestamp: payload.fetchedAt ?? new Date().toISOString(),
-              source: isFallback
-                ? DEMO_STATUS_LABEL
-                : 'Frankfurter EZB-Referenzkurs (USD/EUR)',
-              status: isFallback ? 'fallback' : 'delayed',
-              isDemo: isFallback,
-            };
-            fxCache.set('USD_EUR', { fx: fxQuote, fetchedAtMs: Date.now() });
-            return payload;
+          const payload = parseStaticMarketSnapshot(await res.json());
+          if (payload) {
+            return this.applyLoadedSnapshot(payload);
           }
         }
       } catch {
-        // Fall through to offline fallback
+        // Fall through to Priority B (static snapshot)
       }
 
-      if (sharedCatalogueSnapshot) {
-        return sharedCatalogueSnapshot.data;
+      // Priority B: Static snapshot generated for GitHub Pages (`${import.meta.env.BASE_URL}market-prices.json`)
+      try {
+        const snapshotUrl = this.getSnapshotUrl();
+        const staticRes = await this.fetchImpl(snapshotUrl, {
+          headers: { Accept: 'application/json' },
+        });
+        if (staticRes.ok) {
+          const staticPayload = parseStaticMarketSnapshot(await staticRes.json());
+          if (staticPayload) {
+            return this.applyLoadedSnapshot(staticPayload);
+          }
+        }
+      } catch {
+        // Fall through to Priority C (demo fallback)
       }
 
+      if (currentCached) {
+        return currentCached.data;
+      }
+
+      // Priority C: Clearly labelled educational demo fallback
       const fallback = buildOfflineCatalogueFallback();
-      sharedCatalogueSnapshot = { data: fallback, fetchedAtMs: Date.now() };
-      return fallback;
+      return this.applyLoadedSnapshot(fallback);
     })();
 
+    if (!this.usesGlobalCache) {
+      return loadTask;
+    }
+
+    pendingCataloguePromise = loadTask;
     try {
       return await pendingCataloguePromise;
     } finally {
@@ -313,51 +433,19 @@ class DefaultMarketDataService implements MarketDataService {
   }
 
   async getProviderStatus(): Promise<ProviderStatusInfo> {
-    if (cachedProviderStatus) {
-      return cachedProviderStatus;
+    const currentStatus = this.usesGlobalCache ? cachedProviderStatus : this.localProviderStatus;
+    if (currentStatus) {
+      return currentStatus;
     }
 
-    try {
-      const response = await fetch('/api/market/status', {
-        headers: { Accept: 'application/json' },
-      });
-      if (response.ok) {
-        const data = (await response.json()) as Partial<ProviderStatusInfo>;
-        if (data && typeof data.configured === 'boolean') {
-          cachedProviderStatus = {
-            mode: data.configured ? 'live_provider' : 'demo',
-            configured: data.configured,
-            providerName:
-              data.providerName ||
-              (data.configured
-                ? 'Börse Frankfurt & Nasdaq (Prototyp-Marktdaten)'
-                : DEMO_STATUS_LABEL),
-            defaultStatus: data.configured ? (data.defaultStatus ?? 'delayed') : 'demo',
-            statusLabel:
-              data.statusLabel ||
-              (data.configured
-                ? 'Verzögerte Börsenkurse (Börse Frankfurt / Nasdaq / EZB-Wechselkurs)'
-                : DEMO_STATUS_LABEL),
-            disclaimerLabel: MARKET_DATA_SIMULATION_NOTICE,
-            lastCheckedAt: new Date().toISOString(),
-          };
-          return cachedProviderStatus;
-        }
-      }
-    } catch {
-      // Static hosting or offline: operate in explicit educational demo mode
+    const snapshot = await this.getCatalogueSnapshot();
+    const derived = deriveProviderStatusFromSnapshot(snapshot);
+    if (this.usesGlobalCache) {
+      cachedProviderStatus = derived;
+    } else {
+      this.localProviderStatus = derived;
     }
-
-    cachedProviderStatus = {
-      mode: 'demo',
-      configured: false,
-      providerName: DEMO_STATUS_LABEL,
-      defaultStatus: 'demo',
-      statusLabel: DEMO_STATUS_LABEL,
-      disclaimerLabel: FALLBACK_QUOTE_NOTICE,
-      lastCheckedAt: new Date().toISOString(),
-    };
-    return cachedProviderStatus;
+    return derived;
   }
 
   async searchInstruments(
@@ -446,7 +534,7 @@ class DefaultMarketDataService implements MarketDataService {
 
     if (status.mode === 'live_provider') {
       try {
-        const res = await fetch(
+        const res = await this.fetchImpl(
           `/api/market/history?symbol=${encodeURIComponent(normalized)}&range=${encodeURIComponent(range)}`,
         );
         if (res.ok) {
@@ -487,7 +575,7 @@ class DefaultMarketDataService implements MarketDataService {
 
     const key = `${from}_${to}`;
     const now = Date.now();
-    if (!options?.forceRefresh) {
+    if (this.usesGlobalCache && !options?.forceRefresh) {
       const cached = fxCache.get(key);
       if (cached && now - cached.fetchedAtMs < CATALOGUE_CACHE_TTL_MS) {
         return cached.fx;
@@ -511,7 +599,9 @@ class DefaultMarketDataService implements MarketDataService {
         status: isFallback ? 'fallback' : 'delayed',
         isDemo: isFallback,
       };
-      fxCache.set(key, { fx, fetchedAtMs: now });
+      if (this.usesGlobalCache) {
+        fxCache.set(key, { fx, fetchedAtMs: now });
+      }
       return fx;
     }
 
@@ -530,14 +620,25 @@ class DefaultMarketDataService implements MarketDataService {
         status: isFallback ? 'fallback' : 'delayed',
         isDemo: isFallback,
       };
-      fxCache.set(key, { fx, fetchedAtMs: now });
+      if (this.usesGlobalCache) {
+        fxCache.set(key, { fx, fetchedAtMs: now });
+      }
       return fx;
     }
 
     const demoFx = getDemoExchangeRate(from, to);
-    fxCache.set(key, { fx: demoFx, fetchedAtMs: now });
+    if (this.usesGlobalCache) {
+      fxCache.set(key, { fx: demoFx, fetchedAtMs: now });
+    }
     return demoFx;
   }
 }
 
+export function createMarketDataService(
+  options?: MarketServiceConfigOptions,
+): MarketDataService {
+  return new DefaultMarketDataService(options);
+}
+
 export const marketDataService = new DefaultMarketDataService();
+

@@ -11,7 +11,8 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/test/app.test.ts"
+    "test": "tsx --test src/test/app.test.ts",
+    "market:snapshot": "tsx scripts/update-market-snapshot.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
